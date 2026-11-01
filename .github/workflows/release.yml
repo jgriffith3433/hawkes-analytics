@@ -1,0 +1,49 @@
+# Releases when main gets a version that has no tag yet: tags v<version> (what Unity games pin by git URL, what
+# bundled games pin as a tarball, and what Hawkes Studio's Hawkes Analytics plugin lists as the latest) and makes a
+# GitHub release with both packages as tarballs. main moves only when Jaycee takes beta live, so this runs only then.
+# The workflow's own token; no secrets. Nothing is published to npm (that would be Jaycee's call).
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: ['package.json', 'Packages/com.hawkes.analytics/package.json']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check before tagging
+        run: npm test
+      - name: Tag and release the version in package.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -r .version package.json)
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then echo "$tag is already released"; exit 0; fi
+          npm run pack
+          notes=$(awk -v v="$version" '$0 ~ "^## \\[?"v {f=1; next} f && /^## / {exit} f' CHANGELOG.md)
+          [ -n "$notes" ] || notes="Hawkes Analytics $version"
+          git tag -a "$tag" -m "Hawkes Analytics $version" "$GITHUB_SHA"
+          git push origin "$tag"
+          gh release create "$tag" dist/*.tgz --title "Hawkes Analytics $version" --notes "$notes
+
+          Web: <script src=\"https://hawkesgen.ai/sdk/analytics@${version%%.*}.js\" data-product=\"<your project>\" defer></script>
+          npm: https://github.com/$GITHUB_REPOSITORY/archive/refs/tags/$tag.tar.gz
+          Unity: https://github.com/$GITHUB_REPOSITORY.git?path=/Packages/com.hawkes.analytics#$tag"

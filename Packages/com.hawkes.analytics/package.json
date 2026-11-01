@@ -1,0 +1,12 @@
+{
+  "name": "com.hawkes.analytics",
+  "version": "1.3.0",
+  "displayName": "Hawkes Analytics",
+  "description": "Hawkes Analytics for Unity WebGL games: HawkesAnalytics.Track/Screen/SetContext/LevelStart/LevelEnd/Death/Feedback/Ask call window.hawkesAnalytics in the page, and load Hawkes Gen's SDK there when the page hasn't (product from Resources/HawkesAnalyticsSettings). In the Editor and outside WebGL it only logs. Runtime package; the game's website needs no change.",
+  "unity": "2021.3",
+  "documentationUrl": "https://github.com/jgriffith3433/hawkes-analytics#unity",
+  "changelogUrl": "https://github.com/jgriffith3433/hawkes-analytics/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/jgriffith3433/hawkes-analytics/blob/main/LICENSE",
+  "keywords": ["analytics", "webgl", "hawkes"],
+  "author": { "name": "Hawkes Gen", "url": "https://hawkesgen.ai" }
+}

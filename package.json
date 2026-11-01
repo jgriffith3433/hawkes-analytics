@@ -1,0 +1,37 @@
+{
+  "name": "@hawkesgen/analytics",
+  "version": "1.3.0",
+  "description": "Hawkes Analytics: player analytics for web and Unity WebGL games in one line. Sessions, retention, funnels, levels, deaths, errors, feedback and what gets in players' way, read in Hawkes Studio's Analytics tab. https://hawkesgen.ai",
+  "type": "module",
+  "main": "./index.mjs",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.mjs"
+    },
+    "./sdk": {
+      "types": "./hawkes-analytics.d.mts",
+      "default": "./hawkes-analytics.mjs"
+    },
+    "./hawkes-analytics.js": "./hawkes-analytics.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["index.mjs", "index.d.ts", "hawkes-analytics.js", "hawkes-analytics.d.ts", "hawkes-analytics.mjs", "hawkes-analytics.d.mts", "README.md", "CHANGELOG.md", "LICENSE"],
+  "sideEffects": false,
+  "scripts": {
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.ts\" && node tools/check.mjs",
+    "check": "node tools/check.mjs",
+    "pack": "mkdir -p dist && npm pack --pack-destination dist && cd Packages/com.hawkes.analytics && npm pack --pack-destination ../../dist"
+  },
+  "engines": {
+    "node": ">=22.6"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/jgriffith3433/hawkes-analytics#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jgriffith3433/hawkes-analytics.git"
+  },
+  "keywords": ["analytics", "game-analytics", "player-analytics", "retention", "funnels", "unity", "webgl", "babylonjs", "hawkes"]
+}

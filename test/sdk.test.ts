@@ -1,0 +1,498 @@
+// The analytics SDK (hawkes-analytics.js) in a fake browser: batching, sessions, active time, the offline queue,
+// opt-out, env detection, flags, the exit snapshot, the Unity bridge's early queue. The script runs as a classic script
+// in a vm context whose globals are the fake window. (Hawkes Gen's own tests check that it serves this file.)
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SRC = fs.readFileSync(path.join(ROOT, 'hawkes-analytics.js'), 'utf8');
+/** Objects made inside the vm context have its prototypes: compare them as JSON. */
+const plainOf = (v: unknown) => JSON.parse(JSON.stringify(v));
+const T0 = Date.UTC(2026, 9, 19, 12, 0, 0);
+
+class MemStorage {
+  m = new Map<string, string>();
+  getItem(k: string) { return this.m.has(k) ? this.m.get(k)! : null; }
+  setItem(k: string, v: string) { this.m.set(k, String(v)); }
+  removeItem(k: string) { this.m.delete(k); }
+}
+
+type Opts = { url?: string; attrs?: Record<string, string>; ls?: MemStorage; ss?: MemStorage; clock?: { t: number }; webdriver?: boolean; online?: boolean; beacon?: boolean; before?: (w: any) => void };
+
+/** One page load. Storages and the clock can be shared between loads (a reload, a new tab). */
+function page(o: Opts = {}) {
+  const clock = o.clock ?? { t: T0 };
+  const timers: { at: number; fn: () => void; id: number }[] = [];
+  let nextId = 1;
+  const listeners = new Map<string, Function[]>();
+  const sent: any[] = [];
+  const fetched: any[] = [];
+  const u = new URL(o.url ?? 'https://sickofitgame.com/Game/?utm_source=reddit&utm_medium=social');
+  const loc: any = { href: u.href, host: u.host, hostname: u.hostname, pathname: u.pathname, search: u.search };
+  class FDate extends Date {
+    constructor(...a: any[]) { if (a.length) super(...(a as [any])); else super(clock.t); }
+    static now() { return clock.t; }
+  }
+  const on = (scope: string) => (type: string, fn: Function) => { const k = `${scope}:${type}`; listeners.set(k, [...(listeners.get(k) ?? []), fn]); };
+  const doc: any = {
+    visibilityState: 'visible', referrer: 'https://www.reddit.com/r/indiegames/?x=1', title: 'Sick Of It', readyState: 'loading', body: null,
+    currentScript: { getAttribute: (k: string) => (o.attrs ?? { 'data-product': 'sickofit', 'data-build': '1.4.2' })[k] ?? null },
+    addEventListener: on('doc'), querySelector: () => null, createElement: () => ({ getContext: () => null }),
+  };
+  const w: any = {
+    document: doc, location: loc, localStorage: o.ls ?? new MemStorage(), sessionStorage: o.ss ?? new MemStorage(),
+    navigator: {
+      language: 'en-US', maxTouchPoints: 0, hardwareConcurrency: 8, webdriver: o.webdriver ?? false, onLine: o.online ?? true,
+      sendBeacon: (url: string, body: string) => { if (o.beacon === false) return false; sent.push({ url, ...JSON.parse(body) }); return true; },
+    },
+    fetch: (url: string, init: any) => { fetched.push({ url, init }); return Promise.reject(new Error('offline')); },
+    screen: { width: 1920, height: 1080 }, innerWidth: 1280, innerHeight: 720, devicePixelRatio: 2,
+    history: { pushState: (_s: any, _t: any, p: string) => { loc.pathname = p; }, replaceState: () => {} },
+    performance: { now: () => 1234, getEntriesByType: () => [{ responseStart: 120, domContentLoadedEventEnd: 800, loadEventEnd: 1500, domainLookupStart: 0, domainLookupEnd: 10, connectStart: 10, connectEnd: 40, transferSize: 5000, type: 'navigate' }] },
+    requestAnimationFrame: () => 1, crypto: webcrypto, URL, URLSearchParams, Date: FDate, console: { log() {}, warn() {} },
+    setTimeout: (fn: () => void, ms: number) => { const id = nextId++; timers.push({ at: clock.t + (ms || 0), fn, id }); return id; },
+    clearTimeout: (id: number) => { const i = timers.findIndex((x) => x.id === id); if (i >= 0) timers.splice(i, 1); },
+    addEventListener: on('win'),
+  };
+  w.window = w;
+  o.before?.(w);
+  vm.createContext(w);
+  vm.runInContext(SRC, w);
+  const fire = (scope: 'win' | 'doc', type: string, ev: any = {}) => { for (const fn of listeners.get(`${scope}:${type}`) ?? []) fn({ type, ...ev }); };
+  /** Move the clock, running timers as they come due. */
+  const advance = (ms: number) => {
+    const end = clock.t + ms;
+    for (;;) {
+      timers.sort((a, b) => a.at - b.at);
+      const next = timers[0];
+      if (!next || next.at > end) break;
+      timers.shift();
+      clock.t = Math.max(clock.t, next.at);
+      next.fn();
+    }
+    clock.t = end;
+  };
+  const events = () => sent.flatMap((b) => b.events);
+  const names = () => events().map((e: any) => e.name);
+  const hide = () => { doc.visibilityState = 'hidden'; fire('doc', 'visibilitychange'); };
+  const show = () => { doc.visibilityState = 'visible'; fire('doc', 'visibilitychange'); };
+  return { w, a: w.hawkesAnalytics, sent, fetched, events, names, advance, fire, hide, show, clock, ls: o.ls, ss: o.ss };
+}
+
+test('batches: every 5 s, or at 20 events; one session per batch, entry with the first', () => {
+  const p = page();
+  assert.equal(p.sent.length, 0, 'nothing goes out at once');
+  p.advance(5000);
+  assert.equal(p.sent.length, 1);
+  const b = p.sent[0];
+  assert.equal(b.url, 'https://hawkesgen.ai/v1/analytics/collect');
+  assert.equal(b.product, 'sickofit');
+  assert.deepEqual(b.build, { version: '1.4.2' });
+  assert.equal(b.env, 'live');
+  assert.match(b.anon, /^a_[a-z0-9]{16}$/);
+  assert.match(b.session, /^s_[a-z0-9]{16}$/);
+  assert.deepEqual(b.entry, { referrer: 'www.reddit.com/r/indiegames/', landing: '/Game/', utm: { source: 'reddit', medium: 'social' } });
+  assert.equal(b.device.screen, '1920x1080');
+  assert.equal(b.device.viewport, '1280x720');
+  assert.equal(b.device.dpr, 2);
+  assert.equal(b.device.lang, 'en-US');
+  assert.equal(b.device.cores, 8);
+  assert.deepEqual(b.events.map((e: any) => e.name), ['session_start', 'page_view']);
+  assert.deepEqual(b.events.map((e: any) => e.seq), [0, 1]);
+  assert.equal(b.events[0].props.returning, false);
+
+  p.a.setContext({ level: '2', mode: 'story', junk: { no: 1 } });
+  for (let i = 0; i < 20; i++) p.a.track('tick', { i });
+  assert.equal(p.sent.length, 2, '20 events go at once');
+  assert.equal(p.sent[1].events.length, 20);
+  assert.equal(p.sent[1].entry, undefined, 'entry only until it went once');
+  assert.deepEqual(p.sent[1].events[0].ctx, { level: '2', mode: 'story' });
+  assert.equal(p.sent[1].events[19].seq, 21);
+
+  // The load timings arrive after load.
+  p.fire('win', 'load');
+  p.advance(6000);
+  assert.ok(p.names().includes('page_load'));
+  assert.equal(p.events().find((e: any) => e.name === 'page_load').props.ttfb, 120);
+
+  // SPA routes count as page views.
+  p.w.history.pushState({}, '', '/Game/shop');
+  p.a.flush();
+  const pv = p.events().filter((e: any) => e.name === 'page_view');
+  assert.equal(pv.length, 2);
+  assert.equal(pv[1].page, '/Game/shop');
+});
+
+test('the build: data-build, init({ build }), and window.HAWKES_BUILD over both', () => {
+  const p = page({ attrs: {} });
+  p.advance(6000);
+  assert.equal(p.sent.length, 0, 'no product, nothing sent');
+  p.a.init({ product: 'phorigins', build: '0.9' });
+  assert.equal(p.sent.length, 1, 'init sends what waited');
+  assert.equal(p.sent[0].product, 'phorigins');
+  assert.deepEqual(p.sent[0].build, { version: '0.9' });
+  p.w.HAWKES_BUILD = { version: '1.0.0', commit: 'a1b2c3d', date: '2026-10-18' };
+  p.a.track('thing');
+  p.a.flush();
+  assert.deepEqual(p.sent[1].build, { version: '1.0.0', commit: 'a1b2c3d', date: '2026-10-18' });
+});
+
+test('sessions: a reload continues, 30 idle minutes start a new one, a new tab is a new one', () => {
+  const ls = new MemStorage(), ss = new MemStorage(), clock = { t: T0 };
+  const p1 = page({ ls, ss, clock });
+  p1.advance(5000);
+  const s1 = p1.sent[0].session;
+  p1.advance(60_000);
+  const p2 = page({ ls, ss, clock });
+  p2.advance(5000);
+  assert.equal(p2.sent[0].session, s1, 'a reload keeps the session');
+  assert.deepEqual(p2.sent[0].events.map((e: any) => [e.name, e.seq]), [['page_view', 2]], 'seq goes on');
+
+  p2.advance(31 * 60_000);
+  p2.fire('win', 'pointerdown');
+  p2.advance(5000);
+  const after = p2.sent.slice(1);
+  assert.equal(after[0].session, s1);
+  assert.deepEqual(after[0].events.map((e: any) => e.name), ['session_end']);
+  assert.notEqual(after[1].session, s1);
+  assert.equal(after[1].events[0].name, 'session_start');
+  assert.equal(after[1].events[0].seq, 0);
+  assert.equal(after[1].events[0].props.returning, true);
+  assert.ok(after[1].entry, 'a new session sends its entry');
+
+  const tab = page({ ls, clock });
+  tab.advance(5000);
+  assert.notEqual(tab.sent[0].session, s1);
+  assert.equal(tab.sent[0].anon, p1.sent[0].anon, 'the same player');
+  assert.equal(tab.sent[0].events[0].props.visits, 3);
+});
+
+test('active time: visible and an input in the last 60 s; nothing before the first real input, sent once as first_input', () => {
+  const idle = page();
+  idle.advance(45_000);
+  idle.fire('win', 'keydown', { isTrusted: false }); // a page script's synthetic event
+  idle.a.track('untouched');
+  idle.hide();
+  idle.show();
+  idle.advance(10_000);
+  idle.a.flush();
+  assert.equal(idle.events().find((e: any) => e.name === 'untouched').active, 0, 'a page nobody touched has no active time');
+  assert.ok(!idle.names().includes('first_input'));
+  assert.equal(idle.events().find((e: any) => e.name === 'exit').props.active, 0);
+
+  const p = page();
+  p.advance(2500);
+  p.fire('win', 'keydown');
+  p.advance(30_000);
+  p.a.track('one');
+  p.advance(10 * 60_000); // idle: only 60 s after the last input count
+  p.a.track('two');
+  p.fire('win', 'pointerdown');
+  p.advance(20_000);
+  p.hide();
+  p.advance(5 * 60_000); // hidden: nothing counts
+  p.show();
+  p.advance(10_000);
+  p.a.track('three');
+  p.a.flush();
+  const ev = Object.fromEntries(p.events().map((e: any) => [e.name, e]));
+  assert.equal(ev.one.active, 30_000);
+  assert.equal(ev.two.active, 60_000);
+  assert.equal(ev.exit.props.active, 80);
+  assert.equal(ev.three.active, 90_000, 'coming back counts as activity');
+  assert.deepEqual(plainOf(ev.first_input.props), { kind: 'key', after: 2.5 });
+  assert.equal(p.names().filter((n: string) => n === 'first_input').length, 1, 'once per session');
+});
+
+test('the exit snapshot: the last 20 events, the game state trimmed, active time; once per hide', () => {
+  const big = { ready: true, status: 'running', scene: 'Level 2', blob: 'x'.repeat(20_000), nested: { a: 1 } };
+  const p = page({ before: (w) => { w.hawkesPlaytest = { state: () => big, start() {} }; } });
+  for (let i = 0; i < 25; i++) p.a.track('step', { i });
+  p.hide();
+  p.fire('win', 'pagehide');
+  const exits = p.events().filter((e: any) => e.name === 'exit');
+  assert.equal(exits.length, 1, 'visibility hidden and pagehide make one exit');
+  const x = exits[0].props;
+  assert.equal(x.recent.length, 20);
+  assert.equal(x.recent[19].name, 'step');
+  assert.equal(x.state._trimmed, true);
+  assert.equal(x.state.scene, 'Level 2');
+  assert.equal(x.state.blob.length, 200);
+  assert.equal(x.state.nested, undefined);
+  assert.equal(typeof x.active, 'number');
+  assert.equal(p.names().at(-1), 'session_end');
+  assert.ok(p.sent.every((b: any) => JSON.stringify(b).length < 64 * 1024), 'every batch under 64 KB');
+});
+
+test('the offline queue: kept in localStorage, capped, sent on the next visit', () => {
+  const ls = new MemStorage(), clock = { t: T0 };
+  const p = page({ ls, clock, online: false });
+  p.advance(5000);
+  assert.equal(p.sent.length, 0);
+  const box = JSON.parse(ls.getItem('hawkes.outbox')!);
+  assert.equal(box.length, 1);
+  for (let i = 0; i < 100; i++) { p.a.track('xx'); p.a.flush(); }
+  assert.ok(JSON.parse(ls.getItem('hawkes.outbox')!).length <= 40, 'capped');
+
+  const next = page({ ls, clock });
+  next.fire('win', 'load');
+  next.advance(1500);
+  assert.ok(next.sent.length >= 40, 'retried on the next visit');
+  assert.equal(ls.getItem('hawkes.outbox'), null);
+
+  // sendBeacon refused and fetch failing: into the queue too.
+  const ls2 = new MemStorage();
+  const q = page({ ls: ls2, beacon: false });
+  q.advance(5000);
+  assert.equal(q.fetched.length, 1);
+  assert.equal(q.fetched[0].init.keepalive, true);
+  return new Promise<void>((r) => setTimeout(() => { assert.equal(JSON.parse(ls2.getItem('hawkes.outbox')!).length, 1); r(); }, 10));
+});
+
+test('opt-out stops everything and is remembered; opt-in starts a session', () => {
+  const ls = new MemStorage(), clock = { t: T0 };
+  const p = page({ ls, clock });
+  p.a.optOut();
+  p.a.track('xx');
+  p.advance(10_000);
+  p.hide();
+  assert.equal(p.sent.length, 0);
+  const again = page({ ls, clock });
+  again.a.track('xx');
+  again.advance(10_000);
+  assert.equal(again.sent.length, 0);
+  assert.equal(again.a.config().optedOut, true);
+  again.a.optIn();
+  again.a.track('back');
+  again.a.flush();
+  assert.deepEqual(again.names(), ['session_start', 'back']);
+});
+
+test('env from the hostname', () => {
+  const env = (url: string) => page({ url }).a.config().env;
+  assert.equal(env('https://sickofitgame.com/'), 'live');
+  assert.equal(env('https://www.phorigins.com/play'), 'live');
+  assert.equal(env('https://sickofit.hawkesgen.ai/Game/'), 'beta');
+  assert.equal(env('https://sickofit.hawkesgen.ai/c/c_123/Game/'), 'preview');
+  assert.equal(env('http://localhost:5173/'), 'local');
+  assert.equal(env('http://127.0.0.1:8080/'), 'local');
+});
+
+test('flags: webdriver, the playtest bot, internal (remembered)', () => {
+  const ls = new MemStorage(), clock = { t: T0 };
+  assert.equal(page({ webdriver: true }).a.config().flags.webdriver, true);
+  assert.equal(page({ url: 'https://sickofitgame.com/Game/?playtest=level-1' }).a.config().flags.playtest, true);
+  assert.equal(page().a.config().flags.automation, undefined);
+  assert.equal(page({ before: (w) => { w.__playwright__binding__ = () => {}; } }).a.config().flags.automation, '__playwright__binding__');
+  assert.equal(page({ before: (w) => { w.document.$cdc_asdjflasutopfhvcZLmcfl_ = {}; } }).a.config().flags.automation, 'cdc_');
+  const bot = page({ before: (w) => { w.hawkesPlaytest = { state: () => ({ ready: true, status: 'idle' }), start() {} }; } });
+  assert.equal(bot.a.config().flags.playtest, false);
+  bot.w.hawkesPlaytest.start('smoke');
+  assert.equal(bot.a.config().flags.playtest, true, 'the runner called start()');
+
+  assert.equal(page({ ls, clock, url: 'https://sickofitgame.com/?hawkes-internal=1' }).a.config().flags.internal, true);
+  const later = page({ ls, clock });
+  assert.equal(later.a.config().flags.internal, true, 'remembered');
+  later.advance(5000);
+  assert.equal(later.sent[0].flags.internal, true);
+  assert.equal(page({ ls, clock, url: 'https://sickofitgame.com/?hawkes-internal=0' }).a.config().flags.internal, false);
+});
+
+test('the game API: levels time themselves and count deaths; errors are deduped', () => {
+  const p = page({ url: 'https://sickofitgame.com/?hawkes-analytics-debug=1' });
+  p.a.loadStart();
+  p.advance(2000);
+  p.a.ready();
+  p.a.screen('level');
+  p.a.levelStart(3);
+  p.advance(4000);
+  p.a.death('imp', { where: 'bridge' });
+  p.a.death('fall');
+  p.advance(6500);
+  p.a.levelEnd(3, 'complete', { score: 10 });
+  p.a.choice('door', 'left');
+  p.a.feature('rewind');
+  p.a.video('intro', 'skip', 3.25);
+  p.a.feedback({ rating: 4, text: 'fun', context: 'level 3' });
+  p.a.track('Bad Name!');
+  p.a.track(null as any, 5 as any);
+  p.a.setContext(null as any);
+  p.fire('win', 'error', { message: 'boom', error: { stack: 'Error: boom\n at a.js:1' } });
+  p.fire('win', 'error', { message: 'boom', error: { stack: 'Error: boom\n at a.js:1' } });
+  p.fire('win', 'unhandledrejection', { reason: new Error('nope') });
+  const log = p.a.debugLog;
+  const by = (n: string) => log.filter((e: any) => e.name === n);
+  assert.equal(by('game_ready')[0].props.ms, 2000);
+  assert.equal(by('level_start')[0].props.level, '3');
+  assert.equal(by('level_start')[0].screen, 'level');
+  assert.deepEqual(plainOf(by('death')[0].props), { cause: 'imp', where: 'bridge' });
+  const end = by('level_end')[0].props;
+  assert.equal(end.duration, 10.5);
+  assert.equal(end.deaths, 2);
+  assert.equal(end.score, 10);
+  assert.equal(by('level_end')[0].ctx.level, '3');
+  assert.deepEqual(plainOf(by('choice')[0].props), { node: 'door', option: 'left' });
+  assert.equal(by('video')[0].props.at, 3.3);
+  assert.equal(by('feedback')[0].props.rating, 4);
+  assert.equal(by('error').length, 2, 'the same error once');
+  assert.equal(by('error')[1].props.source, 'promise');
+  assert.equal(log.some((e: any) => e.name === 'Bad Name!'), false);
+  p.a.flush();
+  assert.ok(log.every((e: any) => e.sent), 'debugLog shows what went out');
+});
+
+test('never throws: blocked storage, a failing beacon, early calls from the Unity bridge', () => {
+  const blocked = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
+  const p = page({ before: (w) => {
+    Object.defineProperty(w, 'localStorage', { get() { throw new Error('SecurityError'); } });
+    w.sessionStorage = blocked;
+    w.navigator.sendBeacon = () => { throw new Error('nope'); };
+    w.hawkesAnalyticsQ = [['setContext', { character: 'susan' }], ['track', 'unity_boot', { a: 1 }], ['nope']];
+  } });
+  p.a.track('xx');
+  p.a.flush();
+  p.a.ask({ id: 'q', question: 'ok?' });
+  p.hide();
+  assert.ok(p.fetched.length >= 1, 'fell back to fetch');
+  const body = JSON.parse(p.fetched[0].init.body);
+  const boot = body.events.find((e: any) => e.name === 'unity_boot');
+  assert.deepEqual(boot.ctx, { character: 'susan' });
+  assert.equal(p.w.hawkesAnalyticsQ.length, 0);
+});
+
+test('ask(): a card that sends feedback; once per session, and not for 7 days after a dismiss', async () => {
+  // Just enough DOM for the card: every element can hold children, a shadow root is itself, selectors find one child each.
+  const el = (): any => {
+    const found = new Map<string, any>();
+    const e: any = {
+      children: [] as any[], removed: false, value: '',
+      setAttribute() {}, addEventListener() {}, focus() {}, attachShadow() { return e; },
+      appendChild(c: any) { e.children.push(c); return c; }, remove() { e.removed = true; },
+      querySelector(sel: string) { if (!found.has(sel)) found.set(sel, el()); return found.get(sel); },
+      querySelectorAll() { return e.children; },
+    };
+    return e;
+  };
+  const ls = new MemStorage(), clock = { t: T0 };
+  const withDom = (w: any) => { w.document.body = el(); w.document.createElement = () => el(); };
+  const p = page({ ls, clock, before: withDom });
+  const answer = p.a.ask({ id: 'after-level-1', question: 'Fun?', context: 'level 1' });
+  const card = p.w.document.body.children[0];
+  const row = card.querySelector('.ha-r');
+  assert.equal(row.children.length, 2, 'thumbs up and down');
+  row.children[0].onclick();
+  p.a.flush();
+  const fb = p.events().find((e: any) => e.name === 'feedback');
+  assert.deepEqual(fb.props, { id: 'after-level-1', rating: 'up', context: 'level 1' });
+  p.advance(1500);
+  assert.deepEqual(plainOf(await answer), { id: 'after-level-1', rating: 'up', context: 'level 1' });
+  assert.equal(card.removed, true);
+  assert.equal(await p.a.ask({ id: 'after-level-1', question: 'Fun?' }), null, 'once per session');
+
+  const stars = p.a.ask({ id: 'ending', question: 'Rate it', kind: 'stars' });
+  const card2 = p.w.document.body.children[1];
+  assert.equal(card2.querySelector('.ha-r').children.length, 5);
+  card2.querySelector('.ha-x').onclick();
+  assert.equal(await stars, null);
+
+  const tab = page({ ls, clock, before: withDom });
+  assert.equal(await tab.a.ask({ id: 'ending', question: 'Rate it' }), null, 'dismissed: not for 7 days');
+  clock.t += 8 * 86_400_000;
+  const later = page({ ls, clock, before: withDom });
+  void later.a.ask({ id: 'ending', question: 'Rate it' });
+  assert.equal(later.w.document.body.children.length, 1, 'shown again after 7 days');
+});
+
+test('the Unity bridge (.jslib): loads the SDK with the product and build, and queues calls until it runs', () => {
+  const JSLIB = fs.readFileSync(path.join(ROOT, 'Packages', 'com.hawkes.analytics', 'Runtime', 'Plugins', 'WebGL', 'HawkesAnalytics.jslib'), 'utf8');
+  const p = page({ url: 'https://sickofitgame.com/Game/v12/', before: (w) => {
+    const added: any[] = [];
+    const lib: any = {};
+    const d = w.document;
+    d.head = { appendChild: (s: any) => added.push(s) };
+    d.querySelectorAll = () => [];
+    d.querySelector = (sel: string) => (sel === 'script[data-hawkes-analytics]' ? added[0] ?? null : null);
+    d.createElement = () => { const attrs: Record<string, string> = {}; return { attrs, setAttribute: (k: string, v: string) => { attrs[k] = v; }, getAttribute: (k: string) => attrs[k] ?? null }; };
+    new Function('mergeInto', 'LibraryManager', 'UTF8ToString', 'window', 'document', 'location', JSLIB)((_l: any, o: any) => Object.assign(lib, o), { library: lib }, (s: string) => s, w, d, w.location);
+    lib.HawkesAnalytics_Init('sickofit', 'https://hawkesgen.ai/sdk/analytics@1.js', '', '1.4.2', 0);
+    lib.HawkesAnalytics_Init('sickofit', 'https://hawkesgen.ai/sdk/analytics@1.js', '', '1.4.2', 0);
+    assert.equal(added.length, 1, 'one script tag');
+    assert.equal(added[0].src, 'https://hawkesgen.ai/sdk/analytics@1.js');
+    assert.equal(added[0].attrs['data-build'], '1.4.2+v12');
+    lib.HawkesAnalytics_Call('setContext', '[{"level":"1"}]');
+    lib.HawkesAnalytics_Call('track', '["unity_boot",{"a":1}]');
+    assert.equal(w.hawkesAnalyticsQ.length, 2);
+    d.currentScript = added[0]; // the SDK runs from that tag
+    w.bridge = lib;
+  } });
+  p.w.bridge.HawkesAnalytics_Call('death', '["imp"]'); // now straight to the SDK
+  p.a.flush();
+  assert.equal(p.sent[0].product, 'sickofit');
+  assert.deepEqual(p.sent[0].build, { version: '1.4.2+v12' });
+  const boot = p.events().find((e: any) => e.name === 'unity_boot');
+  assert.deepEqual(boot.ctx, { level: '1' });
+  assert.ok(p.names().includes('death'));
+});
+
+test('v2: identify ties batches to an account, activity keeps active time, frustration and engage, no repeated exits', () => {
+  const ls = new MemStorage();
+  const p = page({ ls });
+  p.advance(5000);
+  assert.equal(p.sent[0].user, undefined, 'no account until identify');
+  p.a.track('before');
+  p.a.identify('usr_0123456789abcdef');
+  assert.equal(p.sent[1].user, undefined, 'what came before goes without the id');
+  assert.deepEqual(p.sent[1].events.map((e: any) => e.name), ['before']);
+  p.a.frustration('out_of_credits', { need: 8 });
+  p.a.engage('drive', 42.34);
+  p.a.engage('drive', 0);
+  p.a.flush();
+  assert.equal(p.sent[2].user, 'usr_0123456789abcdef');
+  assert.deepEqual(plainOf(p.sent[2].events.map((e: any) => [e.name, e.props])), [['frustration', { kind: 'out_of_credits', need: 8 }], ['engage', { name: 'drive', seconds: 42.3 }]]);
+  assert.equal(ls.getItem('hawkes.user'), 'usr_0123456789abcdef', 'remembered for the next page');
+  p.a.identify('no spaces allowed');
+  p.a.track('xx');
+  p.a.flush();
+  assert.equal(p.sent[3].user, 'usr_0123456789abcdef', 'a bad id is ignored');
+  p.a.identify(null);
+  p.a.track('yy');
+  p.a.flush();
+  assert.equal(p.sent[4].user, undefined, 'signed out');
+
+  // Input the page can't see (a sandboxed game frame) still counts as activity.
+  p.a.activity();
+  p.a.flush();
+  const before = p.events().at(-1).active;
+  assert.equal(p.events().at(-1).name, 'first_input');
+  assert.equal(p.events().at(-1).props.kind, 'forwarded');
+  for (let i = 0; i < 10; i++) { p.advance(50_000); p.a.activity(); }
+  p.a.track('later');
+  p.a.flush();
+  assert.ok(p.events().at(-1).active - before >= 490_000, 'active time kept going with activity()');
+
+  // Hidden, shown, hidden with nothing in between: one exit, not two.
+  p.hide();
+  p.show();
+  p.hide();
+  p.show();
+  assert.equal(p.names().filter((n: string) => n === 'exit').length, 1);
+  p.a.track('more');
+  p.hide();
+  assert.equal(p.names().filter((n: string) => n === 'exit').length, 2, 'something new happened: a new exit');
+});
+
+test('v2: a page without storage takes its ids from init', () => {
+  const p = page({ before: (w) => { Object.defineProperty(w, 'localStorage', { get() { throw new Error('sandboxed'); } }); Object.defineProperty(w, 'sessionStorage', { get() { throw new Error('sandboxed'); } }); } });
+  p.a.init({ product: 'hawkesgen', anon: 'a_fromtheserver01', user: 'usr_0123456789abcdef' });
+  assert.equal(p.sent[0].anon, 'a_fromtheserver01');
+  assert.equal(p.sent[0].user, 'usr_0123456789abcdef');
+  const q = page();
+  const mine = q.a.config().anon;
+  q.a.init({ anon: 'a_fromtheserver01' });
+  assert.equal(q.a.config().anon, mine, 'a page with its own storage keeps its own id');
+});

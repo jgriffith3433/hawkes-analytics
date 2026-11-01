@@ -1,0 +1,17 @@
+<!-- CI compiles the Unity package's Runtime against UnityEngineStub.cs, once as the Editor/desktop path and once with
+     UNITY_WEBGL (the jslib imports). dotnet build DevTools/CompileCheck [-p:WebGL=true] -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants Condition="'$(WebGL)' == 'true'">$(DefineConstants);UNITY_WEBGL</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="UnityEngineStub.cs" />
+    <Compile Include="../../Packages/com.hawkes.analytics/Runtime/**/*.cs" />
+  </ItemGroup>
+</Project>

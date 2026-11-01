@@ -1,0 +1,49 @@
+# Checks every pull request and every push to dev, beta and main. No secrets, no Unity licence:
+# - npm test: the browser SDK in a fake browser, the npm loader, then tools/check.mjs (one version everywhere,
+#   analytics@<major>.js, every Unity file has a .meta with a unique GUID);
+# - the Unity package's Runtime compiles with plain .NET against a UnityEngine stub, as the Editor/desktop path and as
+#   WebGL (the jslib imports). Studio's Unity build in Hawkes Gen's cloud is the real compile.
+# - both packages pack (the tarballs the release attaches).
+# The beta auto-merge waits for these before merging a pull request into beta.
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, beta, main]
+  push:
+    branches: [dev, beta, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sdk:
+    name: SDK tests and package checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm test
+      - name: Pack both packages
+        run: npm run pack && ls -l dist
+  unity:
+    name: Unity package compiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Editor and desktop
+        run: dotnet build DevTools/CompileCheck -c Release -nologo
+      - name: WebGL
+        run: dotnet build DevTools/CompileCheck -c Release -nologo -p:WebGL=true
