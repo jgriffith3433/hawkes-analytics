@@ -6,6 +6,8 @@ namespace UnityEngine
 {
     public class Object { }
     public class ScriptableObject : Object { }
+    public struct Vector2 { public float x, y; }
+    public struct Vector3 { public float x, y, z; }
     public enum LogType { Error, Assert, Warning, Log, Exception }
     public static class Debug
     {
