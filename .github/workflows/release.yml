@@ -1,13 +1,13 @@
 # Releases when main gets a version that has no tag yet: tags v<version> (what Unity games pin by git URL, what
 # bundled games pin as a tarball, and what Hawkes Studio's Hawkes Analytics plugin lists as the latest) and makes a
 # GitHub release with both packages as tarballs. main moves only when Jaycee takes beta live, so this runs only then.
+# Every push to main runs it; a version that is already tagged is left alone.
 # The workflow's own token; no secrets. Nothing is published to npm (that would be Jaycee's call).
 name: Release
 
 on:
   push:
     branches: [main]
-    paths: ['package.json', 'Packages/com.hawkes.analytics/package.json']
   workflow_dispatch:
 
 permissions:
