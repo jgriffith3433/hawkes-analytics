@@ -40,6 +40,8 @@ jobs:
           npm run pack
           notes=$(awk -v v="$version" '$0 ~ "^## \\[?"v {f=1; next} f && /^## / {exit} f' CHANGELOG.md)
           [ -n "$notes" ] || notes="Hawkes Analytics $version"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$tag" -m "Hawkes Analytics $version" "$GITHUB_SHA"
           git push origin "$tag"
           gh release create "$tag" dist/*.tgz --title "Hawkes Analytics $version" --notes "$notes
