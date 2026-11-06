@@ -28,7 +28,7 @@ happens. When the player can play, add `hawkesAnalytics.ready();` to your game's
 ### 2. A bundled game (npm: Vite, webpack, TypeScript)
 
 ```bash
-npm install https://github.com/jgriffith3433/hawkes-analytics/archive/refs/tags/v1.3.1.tar.gz
+npm install https://github.com/jgriffith3433/hawkes-analytics/archive/refs/tags/v1.3.2.tar.gz
 ```
 
 ```js
@@ -43,7 +43,7 @@ Run the game and look in the console for `[hawkes-analytics] game_ready`. Remove
 ### 3. A Unity WebGL game
 
 1. Window > Package Manager > + > Add package from git URL, then paste
-   `https://github.com/jgriffith3433/hawkes-analytics.git?path=/Packages/com.hawkes.analytics#v1.3.1`
+   `https://github.com/jgriffith3433/hawkes-analytics.git?path=/Packages/com.hawkes.analytics#v1.3.2`
 2. Assets > Create > Hawkes > Analytics Settings. Save it as `Assets/Resources/HawkesAnalyticsSettings.asset`, set
    **Product** to `my-game`, and tick **Debug**.
 3. Call it from a script, when the title screen is interactive:
@@ -55,6 +55,11 @@ HawkesAnalytics.Ready();
 
 Build for WebGL, play it in a browser and look in the browser console for `[hawkes-analytics] game_ready`. Nothing is
 sent in the Editor.
+
+**Want to see it work first?** Window > Package Manager > Hawkes Analytics > Samples > **Basic events** > Import. Open
+`Assets/Samples/Hawkes Analytics/<version>/Basic events/HawkesAnalyticsSample.unity` and press Play: three buttons each
+send an event, and the list on screen shows every call, newest first. In the Editor nothing leaves your machine; build
+for WebGL with a Product in the settings and the same events reach Hawkes Studio.
 
 ### If something is wrong
 
@@ -99,7 +104,7 @@ Always load it from Hawkes Gen rather than keeping a copy: a Gen release then up
 ### A bundled game (Vite, webpack, TypeScript)
 
 ```bash
-npm install https://github.com/jgriffith3433/hawkes-analytics/archive/refs/tags/v1.3.1.tar.gz
+npm install https://github.com/jgriffith3433/hawkes-analytics/archive/refs/tags/v1.3.2.tar.gz
 ```
 
 ```js
@@ -118,13 +123,13 @@ itself as a module, for a page that can't load scripts from Hawkes Gen.
 Window > Package Manager > + > Add package from git URL:
 
 ```
-https://github.com/jgriffith3433/hawkes-analytics.git?path=/Packages/com.hawkes.analytics#v1.3.1
+https://github.com/jgriffith3433/hawkes-analytics.git?path=/Packages/com.hawkes.analytics#v1.3.2
 ```
 
 or in `Packages/manifest.json`:
 
 ```json
-"com.hawkes.analytics": "https://github.com/jgriffith3433/hawkes-analytics.git?path=/Packages/com.hawkes.analytics#v1.3.1"
+"com.hawkes.analytics": "https://github.com/jgriffith3433/hawkes-analytics.git?path=/Packages/com.hawkes.analytics#v1.3.2"
 ```
 
 Then Assets > Create > Hawkes > Analytics Settings, saved as `Assets/Resources/HawkesAnalyticsSettings.asset`, with the

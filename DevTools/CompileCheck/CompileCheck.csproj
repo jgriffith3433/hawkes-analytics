@@ -13,5 +13,6 @@
   <ItemGroup>
     <Compile Include="UnityEngineStub.cs" />
     <Compile Include="../../Packages/com.hawkes.analytics/Runtime/**/*.cs" />
+    <Compile Include="../../Packages/com.hawkes.analytics/Samples~/**/*.cs" />
   </ItemGroup>
 </Project>
