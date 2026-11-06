@@ -102,3 +102,20 @@ test('every method the loader offers is one the SDK has', () => {
   for (const m of [...ours, 'ask', 'config']) assert.ok(sdkMethods.includes(m), m);
   for (const m of sdkMethods) assert.ok([...ours, 'ask', 'config'].includes(m), `the loader is missing ${m}`);
 });
+
+test('a script that fails to load warns in plain words and the game goes on', async () => {
+  const { w, added } = fakeWindow();
+  (globalThis as any).window = w;
+  const warns: string[] = [];
+  const orig = console.warn;
+  console.warn = (...a: any[]) => { warns.push(a.join(' ')); };
+  try {
+    const m = await fresh();
+    const p = m.load({ product: 'my-game' });
+    added[0].src = 'https://hawkesgen.ai/sdk/analytics@1.js';
+    added[0].fire('error');
+    assert.equal(await p, null);
+  } finally { console.warn = orig; delete (globalThis as any).window; }
+  assert.equal(warns.length, 1);
+  assert.match(warns[0], /Hawkes Gen's script could not be loaded from https:\/\/hawkesgen\.ai\/sdk\/analytics@1\.js, so no analytics are sent \(the game is not affected\)\. Check the player's connection or an ad blocker/);
+});

@@ -496,3 +496,33 @@ test('v2: a page without storage takes its ids from init', () => {
   q.a.init({ anon: 'a_fromtheserver01' });
   assert.equal(q.a.config().anon, mine, 'a page with its own storage keeps its own id');
 });
+
+test('warnings: a missing product id says what happened and how to fix it, once, with debug off', () => {
+  const warns: string[] = [];
+  const p = page({ attrs: {}, before: (w) => { w.console.warn = (...a: any[]) => warns.push(a.join(' ')); } });
+  p.advance(6000); // the first batch is due, but there is nowhere to send it
+  assert.equal(p.sent.length, 0);
+  assert.equal(warns.length, 1);
+  assert.match(warns[0], /^\[hawkes-analytics\] No product id, so nothing is being sent/);
+  assert.match(warns[0], /data-product="my-game"/);
+  assert.match(warns[0], /init\(\{ product: 'my-game' \}\)/);
+  p.a.track('more'); p.a.flush(); p.advance(6000);
+  assert.equal(warns.length, 1, 'once, not on every flush');
+  p.a.init({ product: 'my-game' });
+  assert.equal(p.sent.length, 1, 'and fixing it sends what waited');
+});
+
+test('warnings: no warning when the product is set; a bad event name and a failing call explain themselves', () => {
+  const warns: string[] = [];
+  const p = page({ before: (w) => { w.console.warn = (...a: any[]) => warns.push(a.join(' ')); } });
+  p.advance(6000);
+  assert.deepEqual(warns, []);
+  p.a.track('Shop Purchase');
+  p.a.track('Shop Purchase');
+  assert.equal(warns.length, 1);
+  assert.match(warns[0], /The event name "Shop Purchase" was skipped: names are 2 to 40 characters, start with a lowercase letter/);
+  assert.match(warns[0], /Rename it, for example "shop_purchase"\./);
+  p.a.track('shop_purchase', { get x() { throw new Error('boom'); } });
+  assert.equal(warns.length, 2);
+  assert.match(warns[1], /hawkesAnalytics\.track\(\) could not run \(boom\) and was skipped; your game is not affected\./);
+});

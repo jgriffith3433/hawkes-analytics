@@ -59,6 +59,13 @@
   function quantile(xs, q) { var s = xs.slice().sort(function (a, b) { return a - b; }); return s.length ? s[Math.min(s.length - 1, Math.floor(q * s.length))] : undefined; }
   function on(t, ev, fn, opt) { try { t.addEventListener(ev, fn, opt || { passive: true }); } catch (e) { /* no target */ } }
   function visible() { return doc.visibilityState !== 'hidden'; }
+  // Warnings are for the developer: what happened, then how to fix it, once each. Never thrown, never needs debug on.
+  var warned = {};
+  function warn(code, what, fix) {
+    if (warned[code]) return;
+    warned[code] = true;
+    try { console.warn('[hawkes-analytics] ' + what + ' ' + fix + ' (https://github.com/jgriffith3433/hawkes-analytics#readme)'); } catch (x) { /* no console */ }
+  }
 
   // ------------------------------------------------------------------ config
   var script = doc.currentScript || doc.querySelector('script[data-product][src*="analytics"]');
@@ -264,7 +271,12 @@
   }
   function flush() {
     if (timer) { clearTimeout(timer); timer = null; }
-    if (optedOut || !cfg.product || !queue.length || !sess) return;
+    if (optedOut || !queue.length || !sess) return;
+    if (!cfg.product) {
+      warn('product', 'No product id, so nothing is being sent to Hawkes Analytics.',
+        'Add data-product="my-game" to the script tag (my-game is your project\'s name in Hawkes Gen), or call hawkesAnalytics.init({ product: \'my-game\' }).');
+      return;
+    }
     var list = batches(queue);
     queue = [];
     for (var i = 0; i < list.length; i++) {
@@ -427,7 +439,11 @@
     config: function () { return { product: cfg.product, endpoint: cfg.endpoint, build: build(), debug: cfg.debug, env: envOf(loc.hostname, loc.pathname), anon: anon, session: sess && sess.id, optedOut: optedOut, flags: flags() }; },
     track: function (name, props) {
       name = String(name || '');
-      if (!EVENT_NAME.test(name)) { if (cfg.debug) console.warn('[hawkes-analytics] bad event name', name); return; }
+      if (!EVENT_NAME.test(name)) {
+        warn('name:' + name.slice(0, 40), 'The event name "' + name.slice(0, 40) + '" was skipped: names are 2 to 40 characters, start with a lowercase letter, and use only a-z, 0-9 and _.',
+          'Rename it, for example "shop_purchase".');
+        return;
+      }
       touchSession(now());
       emit(name, props && typeof props === 'object' ? assign({}, props) : undefined);
     },
@@ -490,7 +506,7 @@
   };
   METHODS.forEach(function (m) {
     api[m] = function () {
-      try { return fns[m].apply(null, arguments); } catch (e) { if (cfg.debug) try { console.warn('[hawkes-analytics]', m, e); } catch (x) { /* none */ } }
+      try { return fns[m].apply(null, arguments); } catch (e) { warn('call:' + m, 'hawkesAnalytics.' + m + '() could not run (' + (e && e.message || e) + ') and was skipped; your game is not affected.', 'Check the arguments against the README; ask for help at https://hawkesgen.ai if it keeps happening.'); }
       return m === 'ask' ? Promise.resolve(null) : undefined;
     };
   });
