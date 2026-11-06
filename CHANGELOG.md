@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.5 (2026-11-06)
+
+- Demo page: the **Basic events** Unity sample, running on the page. Three buttons (`Track`, `Feature`, `Level start +
+  end`) call the real SDK and fill an on-screen list, newest first, with a count, as the scene does. The page is what
+  the beta site shows, so the sample's behaviour can be seen without Unity. No SDK or Unity code changed.
+
 ## 1.3.4 (2026-11-06)
 
 - **Privacy and reliability story** (`docs/privacy.md`): every field a batch and an event carries, what is never sent,

@@ -39,6 +39,9 @@
     .toggle { display: flex; align-items: center; gap: 10px; font-weight: 600; margin-bottom: 8px; }
     .toggle input { width: 22px; height: 22px; accent-color: var(--accent); }
     .state { font-weight: 600; }
+    #sample-list { list-style: none; margin: 0; padding: 0; font-family: ui-monospace, monospace; font-size: 14px; }
+    #sample-list li { border-top: 1px solid var(--line); padding: 4px 0; }
+    #sample-list li:first-child { border-top: 0; }
     details { margin: 8px 0; } summary { cursor: pointer; }
   </style>
 </head>
@@ -116,6 +119,15 @@ hawkesAnalytics.track('demo_click');</pre>
     <p>The Unity package ships the same demo as a sample: three buttons that send an event each, and an on-screen list
        of every call. In Unity: Window &gt; Package Manager &gt; Hawkes Analytics &gt; Samples &gt; Basic events &gt; Import,
        then open <code>HawkesAnalyticsSample.unity</code> and press Play.</p>
+    <p>Here is what you get, running the real SDK on this page. It is the same three buttons and the same list, newest
+       first, as the scene.</p>
+    <div class="row">
+      <button data-sample="track">Track sample_button_pressed</button>
+      <button data-sample="feature">Feature sample_feature</button>
+      <button data-sample="level">Level start + end</button>
+    </div>
+    <p class="state" id="sample-count" role="status">Events sent: none yet</p>
+    <ul id="sample-list" aria-live="polite"><li id="sample-empty">Nothing yet. Press a button.</li></ul>
   </section>
 </main>
 <script>
@@ -203,6 +215,25 @@ hawkesAnalytics.track('demo_click');</pre>
   window.addEventListener('online', privacy); window.addEventListener('offline', privacy);
   // Updates happen on user action and once when the SDK arrives: no timers, no polling.
   document.querySelectorAll('[data-call]').forEach((b) => b.addEventListener('click', () => { calls[b.dataset.call](); show(true); privacy(); }));
+  // The Unity sample, on the page: the same three calls, and a list of every call, newest first (see Samples~/BasicEvents).
+  const sample = {
+    track: () => { a('track', 'sample_button_pressed', { n: sentN + 1 }); return ['track', 'sample_button_pressed']; },
+    feature: () => { a('feature', 'sample_feature'); return ['feature', 'sample_feature']; },
+    level: () => { a('levelStart', 'sample_level'); a('levelEnd', 'sample_level', 'complete'); return ['levelStart + levelEnd', 'sample_level complete']; },
+  };
+  let sentN = 0;
+  document.querySelectorAll('[data-sample]').forEach((b) => b.addEventListener('click', () => {
+    const [call, detail] = sample[b.dataset.sample]();
+    sentN++;
+    const li = document.createElement('li');
+    li.textContent = '#' + sentN + '  ' + call + '  ' + detail;
+    const empty = document.getElementById('sample-empty'); if (empty) empty.remove();
+    const ul = document.getElementById('sample-list');
+    ul.prepend(li);
+    while (ul.children.length > 12) ul.lastChild.remove();
+    document.getElementById('sample-count').textContent = 'Events sent: ' + sentN;
+    show(true); privacy();
+  }));
   document.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => {
     const el = document.getElementById(b.dataset.copy);
     const done = () => { b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy'; }, 1500); };
