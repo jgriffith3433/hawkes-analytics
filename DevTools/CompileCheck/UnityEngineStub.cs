@@ -43,4 +43,25 @@ namespace UnityEngine
     {
         public TooltipAttribute(string tooltip) { }
     }
+    // The Basic events sample (Samples~/BasicEvents): IMGUI and a MonoBehaviour.
+    public class Component : Object { }
+    public class Behaviour : Component { }
+    public class MonoBehaviour : Behaviour { }
+    public struct Rect { public Rect(float x, float y, float w, float h) { } }
+    public struct Matrix4x4 { public static Matrix4x4 Scale(Vector3 v) => default; }
+    public static class Mathf { public static float Max(float a, float b) => a > b ? a : b; public static float Min(float a, float b) => a < b ? a : b; }
+    public static class Screen { public static int width => 0; public static int height => 0; }
+    public class GUILayoutOption { }
+    public static class GUI { public static Matrix4x4 matrix { get; set; } }
+    public static class GUILayout
+    {
+        public static void BeginArea(Rect r) { }
+        public static void EndArea() { }
+        public static void BeginHorizontal() { }
+        public static void EndHorizontal() { }
+        public static void Space(float pixels) { }
+        public static void Label(string text) { }
+        public static bool Button(string text, params GUILayoutOption[] options) => false;
+        public static GUILayoutOption Height(float h) => null;
+    }
 }

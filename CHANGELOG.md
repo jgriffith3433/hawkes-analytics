@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.2 (2026-11-06)
+
+- Unity: a **Basic events** sample (Package Manager > Hawkes Analytics > Samples > Import). A scene with three buttons
+  (`Track`, `Feature`, `levelStart` + `levelEnd`) and an on-screen list of every call, newest first. No Canvas or extra
+  packages. In the Editor the list fills and nothing is sent; in WebGL with a Product set, the events reach Studio.
+- CI compiles the sample too.
+
 ## 1.3.1 (2026-11-06)
 
 - Every warning now says what happened and how to fix it, once each, whether or not debug is on: no product id (web and
