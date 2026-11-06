@@ -158,6 +158,12 @@ level_end, death, purchase and more) with their fields, and the rules for names.
 `?hawkes-analytics-debug=1` on any page (or `debug: true`) logs each event to the console and keeps them on
 `window.hawkesAnalytics.debugLog`. `hawkesAnalytics.optOut()` stops everything for that browser.
 
+## Privacy and reliability
+
+[docs/privacy.md](docs/privacy.md) lists every field the SDK sends (and what it never does), how opt-out works and how
+events wait offline and flush on reconnect. The tests pin those fields, and the demo page has a live **What we send**
+panel, an opt-out toggle and an offline status.
+
 ## Versions
 
 One version for the whole repo, tagged `v<version>`: `1.<SDK version>.<patch>`. The major is the address pages load

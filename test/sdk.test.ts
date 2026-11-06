@@ -544,3 +544,85 @@ test('warnings: names with spaces or capitals are skipped, each warned once, wit
   const names = p.sent.flatMap((b: any) => b.events.map((e: any) => e.name));
   assert.ok(names.includes('level_start') && !names.includes('Level Start') && !names.includes('Death'));
 });
+
+// ---- the privacy and reliability story (docs/privacy.md, the "What we send" panel on the demo page)
+// These pin the exact field names: a new field in a batch must be added to docs/privacy.md and the demo panel too.
+
+test('what we send: a batch has exactly these fields, and nothing that identifies a person', () => {
+  const p = page();
+  p.a.setContext({ level: '3' });
+  p.a.track('demo_click', { at: 1 });
+  p.advance(5000);
+  const b = p.sent[0];
+  const { url: _beacon, ...batch } = plainOf(b); // url is the fake beacon's own bookkeeping
+  assert.deepEqual(Object.keys(batch).sort(), ['anon', 'build', 'device', 'entry', 'env', 'events', 'flags', 'product', 'sdk', 'session']);
+  for (const k of Object.keys(plainOf(b.flags))) assert.ok(['webdriver', 'playtest', 'internal', 'automation'].includes(k), `unexpected flag ${k}`);
+  const dev = plainOf(b.device);
+  for (const k of Object.keys(dev)) assert.ok(['screen', 'viewport', 'dpr', 'lang', 'tz', 'touch', 'conn', 'cores', 'mem', 'gpu'].includes(k), `unexpected device field ${k}`);
+  assert.deepEqual(Object.keys(plainOf(b.entry)).sort(), ['landing', 'referrer', 'utm']);
+  for (const e of b.events) for (const k of Object.keys(plainOf(e))) assert.ok(['name', 'seq', 't', 'active', 'page', 'screen', 'ctx', 'props'].includes(k), `unexpected event field ${k}`);
+  // Sent as is: no cookies, no IP or user agent string collected by the SDK, no page URL query, no text typed by the player.
+  const text = JSON.stringify(b);
+  assert.ok(!/x=1|\?/.test(JSON.stringify([b.entry.referrer, b.entry.landing, b.events.map((e: any) => e.page)])), 'host and path only: never a query string');
+  assert.equal(b.entry.referrer, 'www.reddit.com/r/indiegames/');
+  assert.ok(!/userAgent|cookie|email/i.test(text));
+  assert.match(b.anon, /^a_[a-z0-9]{16}$/, 'an anonymous random id');
+  assert.equal(b.user, undefined, 'no account id unless the game calls identify()');
+  const start = b.events.find((e: any) => e.name === 'session_start');
+  assert.deepEqual(Object.keys(plainOf(start.props)).sort(), ['device', 'first_seen', 'returning', 'visits']);
+});
+
+test('what we send: the request is a plain POST with no credentials', () => {
+  const p = page({ beacon: false });
+  p.advance(5000);
+  assert.equal(p.fetched[0].url, 'https://hawkesgen.ai/v1/analytics/collect');
+  assert.equal(p.fetched[0].init.credentials, 'omit');
+  assert.equal(p.fetched[0].init.method, 'POST');
+});
+
+test('offline: events queue while the browser is offline and flush when it reconnects', () => {
+  const ls = new MemStorage(), p = page({ ls, online: false });
+  p.a.track('shop_open');
+  p.advance(5000);
+  assert.equal(p.sent.length, 0, 'nothing is sent while offline');
+  const waiting = JSON.parse(ls.getItem('hawkes.outbox')!).map((s: string) => JSON.parse(s)).flatMap((b: any) => b.events.map((e: any) => e.name));
+  assert.ok(waiting.includes('shop_open'), 'the event waits in localStorage');
+  p.w.navigator.onLine = true;
+  p.fire('win', 'online');
+  assert.ok(p.names().includes('shop_open'), 'sent on reconnect, in the same page');
+  assert.equal(ls.getItem('hawkes.outbox'), null, 'the queue is emptied once sent');
+});
+
+test('offline: a failed send is kept and retried on reconnect; a server error too', async () => {
+  const ls = new MemStorage(), p = page({ ls, beacon: false });
+  p.a.track('a_thing');
+  p.advance(5000);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(JSON.parse(ls.getItem('hawkes.outbox')!).length, 1, 'fetch failed: the batch is kept');
+  p.w.navigator.sendBeacon = (url: string, body: string) => { p.sent.push({ url, ...JSON.parse(body) }); return true; };
+  p.fire('win', 'online');
+  assert.ok(p.names().includes('a_thing'));
+  assert.equal(ls.getItem('hawkes.outbox'), null);
+});
+
+test('opt-out: nothing is sent, queued or kept, and the waiting queue is deleted', () => {
+  const ls = new MemStorage(), p = page({ ls, online: false });
+  p.a.track('before');
+  p.advance(5000);
+  assert.ok(ls.getItem('hawkes.outbox'), 'something is waiting offline');
+  p.a.optOut();
+  assert.equal(ls.getItem('hawkes.outbox'), null, 'opting out deletes what was waiting');
+  p.w.navigator.onLine = true;
+  p.fire('win', 'online');
+  p.fire('win', 'pointerdown', { isTrusted: true });
+  p.a.track('after');
+  p.a.error(new Error('boom'));
+  p.a.feedback({ rating: 5 });
+  p.a.flush();
+  p.advance(60_000);
+  p.hide();
+  assert.equal(p.sent.length, 0, 'no beacon');
+  assert.equal(p.fetched.length, 0, 'no fetch');
+  assert.equal(ls.getItem('hawkes.outbox'), null, 'nothing queued');
+  assert.equal(p.a.config().optedOut, true);
+});
