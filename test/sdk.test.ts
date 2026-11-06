@@ -520,9 +520,27 @@ test('warnings: no warning when the product is set; a bad event name and a faili
   p.a.track('Shop Purchase');
   p.a.track('Shop Purchase');
   assert.equal(warns.length, 1);
-  assert.match(warns[0], /The event name "Shop Purchase" was skipped: names are 2 to 40 characters, start with a lowercase letter/);
+  assert.match(warns[0], /The event name "Shop Purchase" was skipped \(it has spaces\): names are 2 to 40 characters, start with a lowercase letter/);
   assert.match(warns[0], /Rename it, for example "shop_purchase"\./);
   p.a.track('shop_purchase', { get x() { throw new Error('boom'); } });
   assert.equal(warns.length, 2);
   assert.match(warns[1], /hawkesAnalytics\.track\(\) could not run \(boom\) and was skipped; your game is not affected\./);
+});
+
+test('warnings: names with spaces or capitals are skipped, each warned once, with the fixed name suggested', () => {
+  const warns: string[] = [];
+  const p = page({ before: (w) => { w.console.warn = (...a: any[]) => warns.push(a.join(' ')); } });
+  p.a.track('Level Start'); p.a.track('Level Start');
+  assert.equal(warns.length, 1, 'the same bad name warns once');
+  assert.match(warns[0], /"Level Start" was skipped \(it has spaces\)/);
+  assert.match(warns[0], /for example "level_start"/);
+  p.a.track('levelEnd'); p.a.track('levelEnd'); p.a.track('Death');
+  assert.equal(warns.length, 3, 'each different bad name warns once');
+  assert.match(warns[1], /\(it has capital letters\)/);
+  assert.match(warns[1], /for example "level_end"/);
+  assert.match(warns[2], /for example "death"/);
+  p.a.track('level_start'); p.a.flush();
+  assert.equal(warns.length, 3, 'a good name says nothing');
+  const names = p.sent.flatMap((b: any) => b.events.map((e: any) => e.name));
+  assert.ok(names.includes('level_start') && !names.includes('Level Start') && !names.includes('Death'));
 });
