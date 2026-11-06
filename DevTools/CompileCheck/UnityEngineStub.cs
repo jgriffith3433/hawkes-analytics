@@ -7,7 +7,7 @@ namespace UnityEngine
     public class Object { }
     public class ScriptableObject : Object { }
     public struct Vector2 { public float x, y; }
-    public struct Vector3 { public float x, y, z; }
+    public struct Vector3 { public float x, y, z; public Vector3(float x, float y, float z) { this.x = x; this.y = y; this.z = z; } }
     public enum LogType { Error, Assert, Warning, Log, Exception }
     public static class Debug
     {
