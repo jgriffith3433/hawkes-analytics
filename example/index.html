@@ -32,6 +32,14 @@
     @keyframes fresh { from { background: color-mix(in srgb, var(--ok) 30%, transparent); } to { background: transparent; } }
     @media (prefers-reduced-motion: reduce) { #events .new { animation: none; } }
     #empty { color: var(--muted); }
+    .panel table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .panel th, .panel td { text-align: left; vertical-align: top; padding: 6px 8px 6px 0; border-top: 1px solid var(--line); }
+    .panel th { font-family: ui-monospace, monospace; font-weight: 600; white-space: nowrap; width: 1%; }
+    .panel td { color: var(--muted); }
+    .toggle { display: flex; align-items: center; gap: 10px; font-weight: 600; margin-bottom: 8px; }
+    .toggle input { width: 22px; height: 22px; accent-color: var(--accent); }
+    .state { font-weight: 600; }
+    details { margin: 8px 0; } summary { cursor: pointer; }
   </style>
 </head>
 <body>
@@ -75,6 +83,33 @@ hawkesAnalytics.track('demo_click');</pre>
     <p>Each event shows up here the moment you send it, with what it tells you. No reload.
        <span id="count">0 events</span></p>
     <ul id="events" aria-live="polite"><li id="empty">No events yet. Do step 2.</li></ul>
+  </section>
+  <section id="privacy" class="panel" aria-labelledby="hps">
+    <h2 id="hps">What we send</h2>
+    <p>Trust matters, so here is every field, exactly. Nothing else leaves the page. Full detail:
+       <a href="https://github.com/jgriffith3433/hawkes-analytics/blob/main/docs/privacy.md">docs/privacy.md</a>.</p>
+    <table id="send-table" aria-label="Fields sent with every batch"><tbody></tbody></table>
+    <details open><summary>The last event this page recorded, as it would be sent</summary>
+      <pre id="send-last">No event yet. Press a button in step 2.</pre></details>
+    <p><b>Never sent:</b> cookies, keystrokes, mouse trails, page text, query strings, email or name. Only
+       the page's own random id, never anything about the person.</p>
+  </section>
+
+  <section id="optout" class="panel" aria-labelledby="hos">
+    <h2 id="hos">Opt out</h2>
+    <p>One call stops all sending, now and on every later visit to this browser, and deletes what was waiting.</p>
+    <label class="toggle"><input type="checkbox" id="optout-toggle"> Stop all sending (opt out)</label>
+    <p>Status: <span class="state" id="optout-state" role="status">loading…</span></p>
+    <p>Try it: switch it on, press the buttons in step 2, and step 3 stays as it was. Nothing is recorded.</p>
+  </section>
+
+  <section id="offline" class="panel" aria-labelledby="hfs">
+    <h2 id="hfs">Offline and reliability</h2>
+    <p>With a product set, events that cannot be sent (you are offline, or the server is down) wait in this browser, at most
+       40 batches, and go out when it comes back online or on your next visit. No retry timer runs. This demo has no
+       product, so nothing waits here; the tests cover it.</p>
+    <p>Browser: <span class="state" id="net-state" role="status">…</span> &middot; waiting to be sent:
+       <span class="state" id="outbox-count">0</span> batches</p>
   </section>
   <section id="unity" aria-labelledby="hus">
     <h2 id="hus">Making a Unity game?</h2>
@@ -134,8 +169,40 @@ hawkesAnalytics.track('demo_click');</pre>
     shown = log.length;
     document.getElementById('count').textContent = shown + (shown === 1 ? ' event' : ' events');
   }
+  // What we send: one list, the same names docs/privacy.md and the tests use (tools/check.mjs keeps them together).
+  const SENT = [
+    ['product', 'Your game\'s id.'], ['build', 'Your game\'s version (and commit, date).'], ['env', 'local, beta, preview or live, from the host name.'],
+    ['anon', 'A random id kept in this browser. Not made from anything about you.'], ['session', 'A random id for this visit.'],
+    ['user', 'Only if the game calls identify(): its own account id.'], ['sdk', 'The SDK version.'],
+    ['entry', 'First batch of a visit: referrer (host and path), landing path, utm tags.'],
+    ['flags', 'webdriver, playtest, internal, automation: tells bots from players.'],
+    ['device', 'screen, viewport, dpr, lang, tz, touch, conn, cores, mem, gpu.'],
+    ['events[].name, seq, t, active', 'Which event, its number, when, and active milliseconds so far.'],
+    ['events[].page, screen, ctx', 'Path (no query), the game\'s screen name and context.'],
+    ['events[].props', 'The event\'s own details: what you passed, or the SDK\'s (see docs/privacy.md).'],
+  ];
+  const tb = document.querySelector('#send-table tbody');
+  SENT.forEach(([k, d]) => { const tr = document.createElement('tr'), th = document.createElement('th'), td = document.createElement('td'); th.textContent = k; td.textContent = d; tr.append(th, td); tb.append(tr); });
+  function privacy() {
+    const h = window.hawkesAnalytics, off = !!(h && h.config && h.config().optedOut);
+    document.getElementById('optout-toggle').checked = off;
+    document.getElementById('optout-state').textContent = !h || !h.version ? 'SDK not loaded: nothing is sent' : off ? 'Opted out. Nothing is recorded, queued or sent.' : 'Recording (this demo has no product, so nothing leaves the page anyway).';
+    const last = h && h.debugLog && h.debugLog.length ? h.debugLog[h.debugLog.length - 1] : null;
+    document.getElementById('send-last').textContent = last ? JSON.stringify({ events: [{ name: last.name, seq: last.seq, t: last.t, active: last.active, page: last.page, screen: last.screen, ctx: last.ctx, props: last.props }] }, null, 2) : 'No event yet. Press a button in step 2.';
+    let waiting = 0;
+    try { waiting = (JSON.parse(localStorage.getItem('hawkes.outbox') || '[]') || []).length; } catch (e) { /* storage blocked */ }
+    document.getElementById('outbox-count').textContent = waiting;
+    document.getElementById('net-state').textContent = navigator.onLine === false ? 'offline' : 'online';
+  }
+  document.getElementById('optout-toggle').addEventListener('change', (e) => {
+    const h = window.hawkesAnalytics;
+    if (h && h.version) e.target.checked ? h.optOut() : h.optIn();
+    show(false); privacy();
+  });
+  // On user action, when the SDK arrives and when the browser goes offline or online: no timers.
+  window.addEventListener('online', privacy); window.addEventListener('offline', privacy);
   // Updates happen on user action and once when the SDK arrives: no timers, no polling.
-  document.querySelectorAll('[data-call]').forEach((b) => b.addEventListener('click', () => { calls[b.dataset.call](); show(true); }));
+  document.querySelectorAll('[data-call]').forEach((b) => b.addEventListener('click', () => { calls[b.dataset.call](); show(true); privacy(); }));
   document.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => {
     const el = document.getElementById(b.dataset.copy);
     const done = () => { b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy'; }, 1500); };
@@ -144,7 +211,7 @@ hawkesAnalytics.track('demo_click');</pre>
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(el.textContent).then(done, () => { b.textContent = 'Press Ctrl+C'; });
     else b.textContent = 'Press Ctrl+C';
   }));
-  window.addEventListener('load', () => show(false));
+  window.addEventListener('load', () => { show(false); privacy(); });
 </script>
 </body>
 </html>

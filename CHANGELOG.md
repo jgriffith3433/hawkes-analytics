@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.4 (2026-11-06)
+
+- **Privacy and reliability story** (`docs/privacy.md`): every field a batch and an event carries, what is never sent,
+  how opt-out and the offline queue work. No SDK code changed.
+- Tests pin the exact fields sent (a new field fails until it is documented), that sending is a credential-less POST,
+  that events queue offline and flush when the browser reconnects, and that opt-out sends and queues nothing and deletes
+  what was waiting.
+- Demo page: a **What we send** panel (every field, plus the last real event), an **opt-out toggle** and an offline
+  status with the queue length.
+
 ## 1.3.3 (2026-11-06)
 
 - **Event catalogue and naming guide** (`docs/events.md`): the recommended events for games (level_start, level_end,

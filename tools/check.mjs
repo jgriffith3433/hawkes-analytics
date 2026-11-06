@@ -55,6 +55,13 @@ const guids = new Map();
   }
 })(UPM);
 
+// The privacy story: every field the SDK puts in a batch is in docs/privacy.md and on the demo page's "What we send" panel.
+const privacy = read('docs/privacy.md'), demo = read('example/index.html');
+for (const f of ['product', 'build', 'env', 'anon', 'session', 'user', 'sdk', 'entry', 'flags', 'device', 'events']) {
+  if (!privacy.includes(`| \`${f}\``)) fail(`docs/privacy.md does not list the batch field ${f}`);
+  if (!new RegExp(`\\['${f}(\\[\\]|')`).test(demo)) fail(`example/index.html's What we send panel does not list ${f}`);
+}
+
 if (problems.length) {
   for (const p of problems) console.error(`✗ ${p}`);
   process.exit(1);
