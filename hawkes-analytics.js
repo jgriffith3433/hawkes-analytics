@@ -440,8 +440,10 @@
     track: function (name, props) {
       name = String(name || '');
       if (!EVENT_NAME.test(name)) {
-        warn('name:' + name.slice(0, 40), 'The event name "' + name.slice(0, 40) + '" was skipped: names are 2 to 40 characters, start with a lowercase letter, and use only a-z, 0-9 and _.',
-          'Rename it, for example "shop_purchase".');
+        var why = /\s/.test(name) ? 'has spaces' : /[A-Z]/.test(name) ? 'has capital letters' : 'is not in the right shape';
+        var fix = name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^[^a-z]+|_+$/g, '').slice(0, 40);
+        warn('name:' + name.slice(0, 40), 'The event name "' + name.slice(0, 40) + '" was skipped (it ' + why + '): names are 2 to 40 characters, start with a lowercase letter, and use only a-z, 0-9 and _.',
+          'Rename it, for example "' + (EVENT_NAME.test(fix) ? fix : 'shop_purchase') + '".');
         return;
       }
       touchSession(now());

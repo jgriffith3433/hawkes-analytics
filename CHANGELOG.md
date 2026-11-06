@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.3 (2026-11-06)
+
+- **Event catalogue and naming guide** (`docs/events.md`): the recommended events for games (level_start, level_end,
+  death, progress, purchase and more) with their fields, and the rules for names.
+- The warning for a skipped event name now says why (spaces, capital letters) and suggests the fixed name
+  (`Shop Purchase` -> `shop_purchase`). Still once per name.
+
 ## 1.3.2 (2026-11-06)
 
 - Unity: a **Basic events** sample (Package Manager > Hawkes Analytics > Samples > Import). A scene with three buttons

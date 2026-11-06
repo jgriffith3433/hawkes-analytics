@@ -28,7 +28,7 @@ happens. When the player can play, add `hawkesAnalytics.ready();` to your game's
 ### 2. A bundled game (npm: Vite, webpack, TypeScript)
 
 ```bash
-npm install https://github.com/jgriffith3433/hawkes-analytics/archive/refs/tags/v1.3.2.tar.gz
+npm install https://github.com/jgriffith3433/hawkes-analytics/archive/refs/tags/v1.3.3.tar.gz
 ```
 
 ```js
@@ -43,7 +43,7 @@ Run the game and look in the console for `[hawkes-analytics] game_ready`. Remove
 ### 3. A Unity WebGL game
 
 1. Window > Package Manager > + > Add package from git URL, then paste
-   `https://github.com/jgriffith3433/hawkes-analytics.git?path=/Packages/com.hawkes.analytics#v1.3.2`
+   `https://github.com/jgriffith3433/hawkes-analytics.git?path=/Packages/com.hawkes.analytics#v1.3.3`
 2. Assets > Create > Hawkes > Analytics Settings. Save it as `Assets/Resources/HawkesAnalyticsSettings.asset`, set
    **Product** to `my-game`, and tick **Debug**.
 3. Call it from a script, when the title screen is interactive:
@@ -104,7 +104,7 @@ Always load it from Hawkes Gen rather than keeping a copy: a Gen release then up
 ### A bundled game (Vite, webpack, TypeScript)
 
 ```bash
-npm install https://github.com/jgriffith3433/hawkes-analytics/archive/refs/tags/v1.3.2.tar.gz
+npm install https://github.com/jgriffith3433/hawkes-analytics/archive/refs/tags/v1.3.3.tar.gz
 ```
 
 ```js
@@ -123,13 +123,13 @@ itself as a module, for a page that can't load scripts from Hawkes Gen.
 Window > Package Manager > + > Add package from git URL:
 
 ```
-https://github.com/jgriffith3433/hawkes-analytics.git?path=/Packages/com.hawkes.analytics#v1.3.2
+https://github.com/jgriffith3433/hawkes-analytics.git?path=/Packages/com.hawkes.analytics#v1.3.3
 ```
 
 or in `Packages/manifest.json`:
 
 ```json
-"com.hawkes.analytics": "https://github.com/jgriffith3433/hawkes-analytics.git?path=/Packages/com.hawkes.analytics#v1.3.2"
+"com.hawkes.analytics": "https://github.com/jgriffith3433/hawkes-analytics.git?path=/Packages/com.hawkes.analytics#v1.3.3"
 ```
 
 Then Assets > Create > Hawkes > Analytics Settings, saved as `Assets/Resources/HawkesAnalyticsSettings.asset`, with the
@@ -147,6 +147,11 @@ HawkesAnalytics.Ask("after-level-3", "How was that level?", "level 3", stars: tr
 ```
 
 In the Editor and outside WebGL nothing is sent (`logOutsideWebGL` in the settings logs each call instead).
+
+## What to send
+
+[docs/events.md](docs/events.md) is the event catalogue and naming guide: the recommended events for a game (level_start,
+level_end, death, purchase and more) with their fields, and the rules for names.
 
 ## Debugging
 
