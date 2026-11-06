@@ -73,7 +73,10 @@ export function load(options = {}) {
         (doc.head || doc.documentElement).appendChild(s);
       }
       s.addEventListener('load', done);
-      s.addEventListener('error', () => resolve(null));
+      s.addEventListener('error', () => {
+        try { console.warn(`[hawkes-analytics] Hawkes Gen's script could not be loaded from ${s.src || src}, so no analytics are sent (the game is not affected). Check the player's connection or an ad blocker, and that the address is ${SDK_URL}.`); } catch { /* no console */ }
+        resolve(null);
+      });
       // A tag that was already on the page may have run (or failed) before we listened.
       w.setTimeout(done, 15000);
     } catch (e) {

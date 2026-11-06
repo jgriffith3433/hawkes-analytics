@@ -35,6 +35,7 @@ namespace Hawkes
             started = false;
             var s = HawkesAnalyticsSettings.Load();
             if (s != null) Init(s);
+            else Debug.LogWarning("[HawkesAnalytics] No settings found, so nothing is being sent. Create them with Assets > Create > Hawkes > Analytics Settings, save the asset as Assets/Resources/HawkesAnalyticsSettings.asset and set its Product, or call HawkesAnalytics.Init(\"my-game\") yourself.");
         }
 
         /// <summary>Start with these settings (done for you when Resources/HawkesAnalyticsSettings exists).</summary>
@@ -54,6 +55,8 @@ namespace Hawkes
         public static void Init(string product, string sdkUrl = "https://hawkesgen.ai/sdk/analytics@1.js", string endpoint = "", bool debug = false)
         {
             started = true;
+            if (string.IsNullOrWhiteSpace(product))
+                Debug.LogWarning("[HawkesAnalytics] The Product is empty, so nothing is being sent. Set it in Assets/Resources/HawkesAnalyticsSettings.asset (it is your project's name in Hawkes Gen, like \"my-game\"), or pass it to HawkesAnalytics.Init(\"my-game\").");
             if (!Live) { Log("init", product); return; }
             try { HawkesAnalytics_Init(product ?? "", sdkUrl ?? "", endpoint ?? "", Application.version ?? "", debug); }
             catch (Exception e) { Debug.LogWarning("[HawkesAnalytics] " + e.Message); }
