@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.6 (2026-11-07)
+
+- Demo page: **Studio's playtest contract** (`window.hawkesPlaytest`) with a `smoke` scenario. It presses *Send an event
+  to Hawkes Gen* and waits for Gen's own answer (`202 accepted`), shown as an "Acknowledged by Hawkes Gen" line in the
+  live list. If the event does not get through it fails with "No event reached Hawkes Gen within 10 seconds". The wait
+  ends on the answer or one 10 second limit; nothing is polled. No SDK or Unity code changed.
+
 ## 1.3.5 (2026-11-06)
 
 - Demo page: the **Basic events** Unity sample, running on the page. Three buttons (`Track`, `Feature`, `Level start +
