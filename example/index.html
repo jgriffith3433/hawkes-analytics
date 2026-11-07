@@ -33,6 +33,11 @@
     @keyframes fresh { from { background: color-mix(in srgb, var(--ok) 30%, transparent); } to { background: transparent; } }
     @media (prefers-reduced-motion: reduce) { #events .new { animation: none; } }
     #empty { color: var(--muted); }
+    #events .ack { font-weight: 600; }
+    #events .ack.ok { color: var(--ok); }
+    #events .ack.bad { color: var(--accent); }
+    button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+    #send-result { font-weight: 600; margin: 0 0 12px; }
     .panel table { width: 100%; border-collapse: collapse; font-size: 14px; }
     .panel th, .panel td { text-align: left; vertical-align: top; padding: 6px 8px 6px 0; border-top: 1px solid var(--line); }
     .panel th { font-family: ui-monospace, monospace; font-weight: 600; white-space: nowrap; width: 1%; }
@@ -72,6 +77,10 @@ hawkesAnalytics.levelEnd(1, 'complete');
 hawkesAnalytics.track('demo_click');</pre>
       <button class="copy" data-copy="snip-2">Copy</button>
     </div>
+    <p>Or send one event all the way to Hawkes Gen and see it come back acknowledged. This one is not kept for any player;
+       it only proves the road is open.</p>
+    <div class="row"><button id="send-event" class="primary">Send an event to Hawkes Gen</button></div>
+    <p id="send-result" role="status">Nothing sent yet.</p>
     <div class="row">
       <button data-call="ready">ready()</button>
       <button data-call="levelStart">levelStart(1)</button>
@@ -157,12 +166,14 @@ hawkesAnalytics.track('demo_click');</pre>
     level_start: 'A player began a level. Together with level end it draws your funnel.',
     level_end: 'A player left a level, and how. Shows where players win, quit or get stuck.',
     death: 'A player died, and to what. Many deaths in one place means that spot is too hard.',
+    demo_send: 'The event the Send button sent to Hawkes Gen. Gen answers when it has it.',
     demo_click: 'A custom event you named yourself. Use track() for anything the built-ins do not cover.',
     feedback: 'A player answered a question you asked.',
     ask: 'A feedback card was shown to the player.',
     error: 'Something broke in the page. Errors are grouped so you see the common ones first.',
   };
   const list = document.getElementById('events');
+  const acks = {};
   let shown = 0;
   function show(fresh) {
     const h = window.hawkesAnalytics;
@@ -177,6 +188,8 @@ hawkesAnalytics.track('demo_click');</pre>
       const p = document.createElement('span'); p.textContent = ' ' + JSON.stringify(e.props || {});
       const s = document.createElement('small'); s.textContent = explain[e.name] || 'An event from your game or the SDK. Its name and details reach your Analytics tab as they are.';
       li.append(b, p, s);
+      const r = e.name === 'demo_send' && e.props ? acks[e.props.n] : null;
+      if (r) { const k = document.createElement('small'); k.className = 'ack ' + (r.ok ? 'ok' : 'bad'); k.setAttribute('data-ack', r.ok ? 'yes' : 'no'); k.textContent = r.text; li.append(k); }
       list.append(li);
     });
     shown = log.length;
@@ -216,6 +229,66 @@ hawkesAnalytics.track('demo_click');</pre>
   window.addEventListener('online', privacy); window.addEventListener('offline', privacy);
   // Updates happen on user action and once when the SDK arrives: no timers, no polling.
   document.querySelectorAll('[data-call]').forEach((b) => b.addEventListener('click', () => { calls[b.dataset.call](); show(true); privacy(); }));
+  // Send one event to Hawkes Gen and wait for its answer: no polling, one request, one 10 second limit. The answer is
+  // Gen's own 202 { accepted }. Anything else (blocked, offline, refused, dropped, silent) is "not acknowledged".
+  const GEN_PRODUCT = 'hawkes-analytics', GEN_WAIT = 10000;
+  const rnd = () => Array.from(crypto.getRandomValues(new Uint8Array(9)), (x) => (x % 36).toString(36)).join('');
+  let sendN = 0, ackWaiters = [];
+  const sendDone = (r) => { ackWaiters.splice(0).forEach((f) => f(r)); };
+  function sendToGen() {
+    const n = ++sendN, out = document.getElementById('send-result');
+    const h = window.hawkesAnalytics;
+    a('track', 'demo_send', { n });
+    out.textContent = 'Sent. Waiting for Hawkes Gen…';
+    const finish = (ok, text) => { acks[n] = { ok, text }; out.textContent = text; show(true); privacy(); sendDone({ ok, text, n }); };
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), GEN_WAIT);
+    const cfg = h && h.config ? h.config() : {};
+    const body = JSON.stringify({ product: GEN_PRODUCT, anon: 'a_' + rnd(), session: 's_' + rnd(),
+      flags: { playtest: !!window.hawkesPlaytest._running, webdriver: !!navigator.webdriver, internal: true },
+      events: [{ name: 'demo_send', seq: n, t: Date.now(), active: 0, page: location.pathname, props: { n } }] });
+    let go;
+    try { go = fetch(cfg.endpoint || 'https://hawkesgen.ai/v1/analytics/collect', { method: 'POST', body, headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, credentials: 'omit', signal: ctl.signal }); }
+    catch (e) { go = Promise.reject(e); }
+    go.then((r) => r.json().catch(() => ({})).then((j) => ({ status: r.status, j })))
+      .then(({ status, j }) => {
+        clearTimeout(t);
+        if (status >= 200 && status < 300 && j && j.accepted >= 1) finish(true, 'Acknowledged by Hawkes Gen: event #' + n + ' accepted.');
+        else finish(false, 'No event reached Hawkes Gen within 10 seconds');
+      }, () => { clearTimeout(t); finish(false, 'No event reached Hawkes Gen within 10 seconds'); });
+  }
+  document.getElementById('send-event').addEventListener('click', sendToGen);
+
+  // Studio's playtest contract (docs: hawkesstudio/docs/playtest.md). "smoke": press Send, wait for Gen's answer.
+  // The wait ends when the answer arrives (a promise the send resolves) or after 10 seconds: nothing is polled.
+  const pt = { _running: false, run: null, status: 'idle', events: [], problems: [], t0: 0 };
+  const ev = (type, detail) => pt.events.push({ t: +((Date.now() - pt.t0) / 1000).toFixed(2), type, detail });
+  window.hawkesPlaytest = {
+    version: 2, product: 'hawkes-analytics', _running: false,
+    scenarios: () => [{ id: 'smoke', title: 'Press Send and see Hawkes Gen acknowledge the event', seconds: 12, tags: ['smoke'],
+      description: 'Loads the page, presses "Send an event to Hawkes Gen" and waits for the acknowledged line in the live list. Fails with "No event reached Hawkes Gen within 10 seconds".' }],
+    start(id) {
+      if (id !== 'smoke') { pt.status = 'error'; pt.problems = [{ severity: 'bug', message: 'Unknown scenario ' + id }]; pt.run = id; return; }
+      pt.run = id; pt.status = 'running'; pt.events = []; pt.problems = []; pt.t0 = Date.now(); window.hawkesPlaytest._running = pt._running = true;
+      ev('start', id);
+      const btn = document.getElementById('send-event');
+      btn.scrollIntoView({ block: 'center' });
+      const wait = new Promise((res) => ackWaiters.push(res));
+      ev('press', 'Send an event to Hawkes Gen');
+      btn.click();
+      return wait.then((r) => {
+        if (r.ok) { ev('acknowledged', r.text); pt.status = 'won'; }
+        else { ev('not-acknowledged', r.text); pt.problems.push({ severity: 'bug', message: r.text }); pt.status = 'lost'; }
+      }).finally(() => { ev('finish', pt.status); window.hawkesPlaytest._running = pt._running = false; });
+    },
+    stop() { pt.status = pt.status === 'running' ? 'done' : pt.status; window.hawkesPlaytest._running = pt._running = false; },
+    state: () => ({ ready: document.readyState === 'complete', status: pt.status, scene: 'Demo page', progress: pt.status === 'running' ? 0.5 : pt.status === 'idle' ? 0 : 1,
+      note: document.getElementById('send-result').textContent }),
+    report: () => ({ scenario: pt.run || 'smoke', outcome: pt.status === 'won' ? 'won' : pt.status === 'running' ? 'stuck' : pt.status === 'idle' ? 'done' : pt.status === 'lost' ? 'lost' : 'error',
+      seconds: pt.t0 ? (Date.now() - pt.t0) / 1000 : 0, metrics: { sent: sendN, acknowledged: Object.values(acks).filter((x) => x.ok).length },
+      events: pt.events, problems: pt.problems, log: pt.events.map((e) => e.type + (e.detail ? ': ' + e.detail : '')) }),
+  };
+  { const q = new URLSearchParams(location.search).get('playtest'); if (q) window.addEventListener('load', () => window.hawkesPlaytest.start(q)); }
+
   // The Unity sample, on the page: the same three calls, and a list of every call, newest first (see Samples~/BasicEvents).
   const sample = {
     track: () => { a('track', 'sample_button_pressed', { n: sentN + 1 }); return ['track', 'sample_button_pressed']; },
