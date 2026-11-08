@@ -19,10 +19,12 @@
     .row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
     button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
     button:hover, button:focus-visible { border-color: var(--accent); }
-    button.copy { position: absolute; top: 8px; right: 8px; padding: 2px 10px; font-size: 13px; }
-    .snip { position: relative; margin: 0 0 12px; }
-    pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; padding-right: 72px; overflow: auto; margin: 0; font-size: 13px; color: var(--fg); }
-    @media (max-width: 600px) { pre { white-space: pre-wrap; word-break: break-all; padding-top: 40px; padding-right: 12px; } }
+    .snip { margin: 0 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow: hidden; }
+    .snip-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 4px 4px 12px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+    button.copy { min-height: 44px; min-width: 88px; padding: 6px 14px; font-size: 15px; }
+    pre { padding: 12px; overflow: auto; margin: 0; font-size: 13px; color: var(--fg); }
+    .snip pre { border: 0; }
+    @media (max-width: 600px) { pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; } }
     #status { font-weight: 600; }
     #events { list-style: none; margin: 0; padding: 0; max-height: 46vh; overflow: auto; }
     #events li { border-top: 1px solid var(--line); padding: 8px 0; }
@@ -39,11 +41,25 @@
     button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
     #send-result { font-weight: 600; margin: 0 0 12px; }
     .panel table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    .panel th, .panel td { text-align: left; vertical-align: top; padding: 6px 8px 6px 0; border-top: 1px solid var(--line); }
+    .panel th, .panel td { text-align: left; vertical-align: top; padding: 6px 8px 6px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
     .panel th { font-family: ui-monospace, monospace; font-weight: 600; white-space: nowrap; width: 1%; }
     .panel td { color: var(--muted); }
-    .toggle { display: flex; align-items: center; gap: 10px; font-weight: 600; margin-bottom: 8px; }
-    .toggle input { width: 22px; height: 22px; accent-color: var(--accent); }
+    @media (max-width: 600px) {
+      .panel table, .panel tbody, .panel tr, .panel th, .panel td { display: block; width: auto; }
+      .panel tr { border-top: 1px solid var(--line); padding: 8px 0; }
+      .panel th, .panel td { border-top: 0; padding: 0; }
+      .panel th { white-space: normal; }
+      .panel pre { font-size: 12px; }
+    }
+    .toggle { display: flex; align-items: center; gap: 14px; min-height: 56px; padding: 6px 12px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); font-weight: 600; font-size: 1.05rem; cursor: pointer; }
+    .toggle input { appearance: none; -webkit-appearance: none; flex: none; position: relative; width: 56px; height: 32px; margin: 0; border-radius: 16px; background: var(--line); cursor: pointer; transition: background .15s; }
+    .toggle input::after { content: ""; position: absolute; top: 4px; left: 4px; width: 24px; height: 24px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.4); transition: transform .15s; }
+    .toggle input:checked { background: var(--accent); }
+    .toggle input:checked::after { transform: translateX(24px); }
+    .toggle input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+    .toggle:has(input:checked) { border-color: var(--accent); }
+    @media (prefers-reduced-motion: reduce) { .toggle input, .toggle input::after { transition: none; } }
+    #optout-line { font-weight: 600; color: var(--accent); }
     .state { font-weight: 600; }
     #sample-list { list-style: none; margin: 0; padding: 0; font-family: ui-monospace, monospace; font-size: 14px; }
     #sample-list li { border-top: 1px solid var(--line); padding: 4px 0; }
@@ -62,8 +78,8 @@
     <p>One line in your page's <code>&lt;head&gt;</code>. It starts sessions, page views, errors and load timings by itself.
        Add <code>data-product="your-game"</code> and it sends them to Hawkes Studio's Analytics tab.</p>
     <div class="snip">
+      <div class="snip-head"><span>HTML</span><button class="copy" data-copy="snip-1">Copy</button></div>
       <pre id="snip-1">&lt;script src="https://hawkesgen.ai/sdk/analytics@1.js" data-product="your-game" defer&gt;&lt;/script&gt;</pre>
-      <button class="copy" data-copy="snip-1">Copy</button>
     </div>
   </section>
 
@@ -71,11 +87,11 @@
     <h2 id="h2s"><span class="n">2</span> Send an event</h2>
     <p>Call the SDK where something happens in your game. Press a button to run its line.</p>
     <div class="snip">
+      <div class="snip-head"><span>JavaScript</span><button class="copy" data-copy="snip-2">Copy</button></div>
       <pre id="snip-2">hawkesAnalytics.levelStart(1);
 hawkesAnalytics.death('spikes');
 hawkesAnalytics.levelEnd(1, 'complete');
 hawkesAnalytics.track('demo_click');</pre>
-      <button class="copy" data-copy="snip-2">Copy</button>
     </div>
     <p>Or send one event all the way to Hawkes Gen and see it come back acknowledged. This one is not kept for any player;
        it only proves the road is open.</p>
@@ -111,7 +127,8 @@ hawkesAnalytics.track('demo_click');</pre>
   <section id="optout" class="panel" aria-labelledby="hos">
     <h2 id="hos">Opt out</h2>
     <p>One call stops all sending, now and on every later visit to this browser, and deletes what was waiting.</p>
-    <label class="toggle"><input type="checkbox" id="optout-toggle"> Stop all sending (opt out)</label>
+    <label class="toggle"><input type="checkbox" role="switch" id="optout-toggle"> <span>Stop all sending (opt out)</span></label>
+    <p id="optout-line" role="status" hidden>Sending is off. Nothing from this browser is recorded or sent.</p>
     <p>Status: <span class="state" id="optout-state" role="status">loading…</span></p>
     <p>Try it: switch it on, press the buttons in step 2, and step 3 stays as it was. Nothing is recorded.</p>
   </section>
@@ -212,6 +229,7 @@ hawkesAnalytics.track('demo_click');</pre>
   function privacy() {
     const h = window.hawkesAnalytics, off = !!(h && h.config && h.config().optedOut);
     document.getElementById('optout-toggle').checked = off;
+    document.getElementById('optout-line').hidden = !off;
     document.getElementById('optout-state').textContent = !h || !h.version ? 'SDK not loaded: nothing is sent' : off ? 'Opted out. Nothing is recorded, queued or sent.' : 'Recording (this demo has no product, so nothing leaves the page anyway).';
     const last = h && h.debugLog && h.debugLog.length ? h.debugLog[h.debugLog.length - 1] : null;
     document.getElementById('send-last').textContent = last ? JSON.stringify({ events: [{ name: last.name, seq: last.seq, t: last.t, active: last.active, page: last.page, screen: last.screen, ctx: last.ctx, props: last.props }] }, null, 2) : 'No event yet. Press a button in step 2.';
@@ -262,11 +280,48 @@ hawkesAnalytics.track('demo_click');</pre>
   // The wait ends when the answer arrives (a promise the send resolves) or after 10 seconds: nothing is polled.
   const pt = { _running: false, run: null, status: 'idle', events: [], problems: [], t0: 0 };
   const ev = (type, detail) => pt.events.push({ t: +((Date.now() - pt.t0) / 1000).toFixed(2), type, detail });
+  // "phone": real taps on the page, measurements logged as events. Any failed check is a bug problem.
+  function phone() {
+    pt.run = 'phone'; pt.status = 'running'; pt.events = []; pt.problems = []; pt.t0 = Date.now(); window.hawkesPlaytest._running = pt._running = true;
+    const w = window.innerWidth, bad = (m) => { ev('fail', m); pt.problems.push({ severity: 'bug', message: m }); }, ok = (m) => ev('pass', m);
+    const R = (el) => el.getBoundingClientRect(), wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    ev('start', 'phone at ' + w + 'px');
+    return (async () => {
+      document.getElementById('step-1').scrollIntoView({ block: 'center' }); await wait(200);
+      const pre = document.getElementById('snip-1'), cp = document.querySelector('[data-copy="snip-1"]');
+      const a1 = R(cp), p1 = R(pre);
+      ev('measure', 'step 1 Copy ' + Math.round(a1.width) + 'x' + Math.round(a1.height) + ', snippet scrollWidth ' + pre.scrollWidth + ' / clientWidth ' + pre.clientWidth);
+      if (a1.height < 44 || a1.width < 44) bad('Copy button is smaller than 44px'); else ok('Copy button is at least 44px');
+      if (a1.bottom > p1.top + 1) bad('Copy button overlaps the snippet'); else ok('Copy button sits above the code');
+      if (pre.scrollWidth > pre.clientWidth + 1) bad('Step 1 snippet scrolls sideways (cut off)'); else ok('Step 1 snippet is fully visible');
+      document.getElementById('privacy').scrollIntoView({ block: 'start' }); await wait(200);
+      const de = document.documentElement, panel = document.getElementById('privacy');
+      ev('measure', 'What we send: panel scrollWidth ' + panel.scrollWidth + ' / clientWidth ' + panel.clientWidth + ', page ' + de.scrollWidth + ' / ' + de.clientWidth);
+      const last = document.getElementById('send-last');
+      if (panel.scrollWidth > panel.clientWidth + 1 || de.scrollWidth > de.clientWidth + 1 || last.scrollWidth > last.clientWidth + 1) bad('What we send scrolls sideways'); else ok('What we send fits with no sideways scroll');
+      const tg = document.getElementById('optout-toggle'), lab = tg.closest('label');
+      lab.scrollIntoView({ block: 'center' }); await wait(200);
+      const l = R(lab);
+      ev('measure', 'opt-out switch ' + Math.round(l.width) + 'x' + Math.round(l.height));
+      if (l.height < 44) bad('Opt-out switch is shorter than 44px'); else ok('Opt-out switch is at least 44px tall');
+      ev('press', 'opt-out switch'); lab.click(); await wait(100);
+      const line = document.getElementById('optout-line'), st = document.getElementById('optout-state').textContent;
+      ev('state', line.hidden ? 'no off line' : line.textContent + ' | ' + st);
+      if (line.hidden || !tg.checked) bad('Tapping the switch did not show that sending is off'); else ok('Sending is off is shown');
+      ev('press', 'opt-out switch back on'); lab.click(); await wait(100);
+      if (!line.hidden) bad('Line stays after switching back');
+    })().catch((e) => bad('Scenario error: ' + e.message)).then(() => {
+      pt.status = pt.problems.length ? 'lost' : 'won'; ev('finish', pt.status); window.hawkesPlaytest._running = pt._running = false;
+    });
+  }
   window.hawkesPlaytest = {
     version: 2, product: 'hawkes-analytics', _running: false,
-    scenarios: () => [{ id: 'smoke', title: 'Press Send and see Hawkes Gen acknowledge the event', seconds: 12, tags: ['smoke'],
+    scenarios: () => [{ id: 'phone', title: 'Phone layout: snippet, opt-out switch, What we send', seconds: 15, tags: ['layout'],
+      description: 'Scrolls to the step 1 snippet, the What we send panel and the opt-out switch; taps the switch; checks no Copy button covers code, no sideways scroll, the switch is at least 44px tall and "Sending is off" shows. Best played at 390px wide.' },
+    { id: 'smoke', title: 'Press Send and see Hawkes Gen acknowledge the event', seconds: 12, tags: ['smoke'],
       description: 'Loads the page, presses "Send an event to Hawkes Gen" and waits for the acknowledged line in the live list. Fails with "No event reached Hawkes Gen within 10 seconds".' }],
     start(id) {
+      if (id === 'phone') return phone();
       if (id !== 'smoke') { pt.status = 'error'; pt.problems = [{ severity: 'bug', message: 'Unknown scenario ' + id }]; pt.run = id; return; }
       pt.run = id; pt.status = 'running'; pt.events = []; pt.problems = []; pt.t0 = Date.now(); window.hawkesPlaytest._running = pt._running = true;
       ev('start', id);

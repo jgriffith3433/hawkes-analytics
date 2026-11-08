@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.7 (2026-11-08)
+
+- Demo page, for phones: each code block has a header row with a **Copy** button of at least 44px, so Copy no longer
+  covers the code, and snippets wrap on narrow screens. The opt-out is a large labelled switch (56px tall) and a plain
+  line, "Sending is off", shows when it is on. *What we send* stacks each field above its meaning at 390px with no
+  sideways scroll. New playtest scenario `phone`. No SDK or Unity code changed.
+
 ## 1.3.6 (2026-11-07)
 
 - Demo page: **Studio's playtest contract** (`window.hawkesPlaytest`) with a `smoke` scenario. It presses *Send an event
