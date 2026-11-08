@@ -4,8 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Hawkes Analytics: 3 steps to your first event</title>
-  <!-- The one line a page needs. No data-product here, so nothing is sent: debug mode shows what would go out. -->
-  <script src="https://hawkesgen.ai/sdk/analytics@1.js" data-debug="1" defer></script>
+  <!-- Counts the SDK's own requests (sendBeacon, or fetch with keepalive) so the Batching panel can show them. -->
+  <script>
+    window.hawkesRequests = [];
+    (function () {
+      var note = function (body) { try { var b = JSON.parse(body); window.hawkesRequests.push({ t: Date.now(), events: (b.events || []).map(function (e) { return e.name; }) }); if (window.onHawkesRequest) window.onHawkesRequest(); } catch (e) { /* not ours */ } };
+      var beacon = navigator.sendBeacon && navigator.sendBeacon.bind(navigator);
+      if (beacon) navigator.sendBeacon = function (url, body) { var ok = beacon(url, body); if (ok) note(body); return ok; };
+      var f = window.fetch && window.fetch.bind(window);
+      if (f) window.fetch = function (url, init) { if (init && init.keepalive && /analytics\/collect/.test(String(url))) note(init.body); return f(url, init); };
+    })();
+  </script>
+  <!-- The one line a page needs. async: it never holds the page up. This demo reports to the hawkes-analytics product; its events are flagged. -->
+  <script src="https://hawkesgen.ai/sdk/analytics@1.js" data-product="hawkes-analytics" data-debug="1" async></script>
   <style>
     :root { color-scheme: light dark; --bg: #f6f5f2; --fg: #1b1b1b; --muted: #666; --card: #fff; --line: #ddd; --accent: #b3261e; --ok: #1b7f3b; }
     @media (prefers-color-scheme: dark) { :root { --bg: #121212; --fg: #eee; --muted: #aaa; --card: #1d1d1d; --line: #333; --accent: #ff8a80; --ok: #7bd88f; } }
@@ -70,8 +81,8 @@
 <body>
 <main>
   <h1>Hawkes Analytics</h1>
-  <p>Your first event in three steps. This page runs the real SDK in debug mode with no product, so events stay here
-     and nothing is sent. SDK: <span id="status">loading…</span></p>
+  <p>Your first event in three steps. This page runs the real SDK in debug mode and reports to the
+     <code>hawkes-analytics</code> product; opt out below to stop it. SDK: <span id="status">loading…</span></p>
 
   <section id="step-1" aria-labelledby="h1s">
     <h2 id="h1s"><span class="n">1</span> Add the script</h2>
@@ -79,7 +90,7 @@
        Add <code>data-product="your-game"</code> and it sends them to Hawkes Studio's Analytics tab.</p>
     <div class="snip">
       <div class="snip-head"><span>HTML</span><button class="copy" data-copy="snip-1">Copy</button></div>
-      <pre id="snip-1">&lt;script src="https://hawkesgen.ai/sdk/analytics@1.js" data-product="your-game" defer&gt;&lt;/script&gt;</pre>
+      <pre id="snip-1">&lt;script src="https://hawkesgen.ai/sdk/analytics@1.js" data-product="your-game" async&gt;&lt;/script&gt;</pre>
     </div>
   </section>
 
@@ -133,11 +144,19 @@ hawkesAnalytics.track('demo_click');</pre>
     <p>Try it: switch it on, press the buttons in step 2, and step 3 stays as it was. Nothing is recorded.</p>
   </section>
 
+  <section id="batching" class="panel" aria-labelledby="hbt">
+    <h2 id="hbt">Batching</h2>
+    <p>Events are not sent one by one. A burst goes out as one request 2 seconds after its last event; when you hide the
+       page, anything waiting goes at once. Tap the button five times fast and watch the count: it goes up by one.</p>
+    <div class="row"><button id="quick-click" class="primary">Quick click</button></div>
+    <p>Clicks: <span class="state" id="click-count">0</span> &middot; requests carrying your clicks:
+       <span class="state" id="req-count" role="status">0</span> &middot; waiting to be sent: <span class="state" id="wait-count">0</span></p>
+    <ul id="req-list" aria-live="polite"></ul>
+  </section>
   <section id="offline" class="panel" aria-labelledby="hfs">
     <h2 id="hfs">Offline and reliability</h2>
     <p>With a product set, events that cannot be sent (you are offline, or the server is down) wait in this browser, at most
-       40 batches, and go out when it comes back online or on your next visit. No retry timer runs. This demo has no
-       product, so nothing waits here; the tests cover it.</p>
+       40 batches, and go out when it comes back online or on your next visit. No retry timer runs. The tests cover it.</p>
     <p>Browser: <span class="state" id="net-state" role="status">…</span> &middot; waiting to be sent:
        <span class="state" id="outbox-count">0</span> batches</p>
   </section>
@@ -184,11 +203,25 @@ hawkesAnalytics.track('demo_click');</pre>
     level_end: 'A player left a level, and how. Shows where players win, quit or get stuck.',
     death: 'A player died, and to what. Many deaths in one place means that spot is too hard.',
     demo_send: 'The event the Send button sent to Hawkes Gen. Gen answers when it has it.',
+    demo_quick: 'One tap on the Batching panel. Five quick taps travel in one request.',
     demo_click: 'A custom event you named yourself. Use track() for anything the built-ins do not cover.',
     feedback: 'A player answered a question you asked.',
     ask: 'A feedback card was shown to the player.',
     error: 'Something broke in the page. Errors are grouped so you see the common ones first.',
   };
+  let clicksN = 0;
+  function batching() {
+    const reqs = window.hawkesRequests.filter((r) => r.events.indexOf('demo_quick') >= 0);
+    document.getElementById('click-count').textContent = clicksN;
+    document.getElementById('req-count').textContent = reqs.length;
+    document.getElementById('wait-count').textContent = Math.max(0, clicksN - reqs.reduce((n, r) => n + r.events.filter((x) => x === 'demo_quick').length, 0));
+    const ul = document.getElementById('req-list'); ul.textContent = '';
+    reqs.forEach((r, i) => { const li = document.createElement('li'); li.textContent = 'Request ' + (i + 1) + ': ' + r.events.length + ' events (' + r.events.join(', ') + ')'; ul.append(li); });
+  }
+  window.onHawkesRequest = batching;
+  document.getElementById('quick-click').addEventListener('click', () => {
+    a('track', 'demo_quick', { n: ++clicksN }); show(true); batching();
+  });
   const list = document.getElementById('events');
   const acks = {};
   let shown = 0;
@@ -230,7 +263,7 @@ hawkesAnalytics.track('demo_click');</pre>
     const h = window.hawkesAnalytics, off = !!(h && h.config && h.config().optedOut);
     document.getElementById('optout-toggle').checked = off;
     document.getElementById('optout-line').hidden = !off;
-    document.getElementById('optout-state').textContent = !h || !h.version ? 'SDK not loaded: nothing is sent' : off ? 'Opted out. Nothing is recorded, queued or sent.' : 'Recording (this demo has no product, so nothing leaves the page anyway).';
+    document.getElementById('optout-state').textContent = !h || !h.version ? 'SDK not loaded: nothing is sent' : off ? 'Opted out. Nothing is recorded, queued or sent.' : 'Recording, and sending to the hawkes-analytics product in batches.';
     const last = h && h.debugLog && h.debugLog.length ? h.debugLog[h.debugLog.length - 1] : null;
     document.getElementById('send-last').textContent = last ? JSON.stringify({ events: [{ name: last.name, seq: last.seq, t: last.t, active: last.active, page: last.page, screen: last.screen, ctx: last.ctx, props: last.props }] }, null, 2) : 'No event yet. Press a button in step 2.';
     let waiting = 0;
@@ -314,14 +347,54 @@ hawkesAnalytics.track('demo_click');</pre>
       pt.status = pt.problems.length ? 'lost' : 'won'; ev('finish', pt.status); window.hawkesPlaytest._running = pt._running = false;
     });
   }
+  // "mobile": phone-size checks of the async tag and load, five quick taps (one request), then hiding the page.
+  function mobile() {
+    pt.run = 'mobile'; pt.status = 'running'; pt.events = []; pt.problems = []; pt.t0 = Date.now(); window.hawkesPlaytest._running = pt._running = true;
+    const bad = (m) => { ev('fail', m); pt.problems.push({ severity: 'bug', message: m }); }, ok = (m) => ev('pass', m);
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const carrying = (n) => window.hawkesRequests.filter((r) => r.events.indexOf(n) >= 0);
+    ev('start', 'mobile at ' + window.innerWidth + 'px');
+    return (async () => {
+      const tag = document.querySelector('script[src*="analytics@1.js"]');
+      ev('measure', 'SDK tag: ' + (tag ? tag.outerHTML : 'missing'));
+      if (tag && tag.async && !tag.defer && tag.hasAttribute('async')) ok('SDK script tag is async'); else bad('SDK script tag is not async');
+      const nav = performance.getEntriesByType('navigation')[0], interactive = nav ? Math.round(nav.domInteractive) : -1;
+      ev('measure', 'interactive (domInteractive) at ' + interactive + ' ms; SDK ' + (window.hawkesAnalytics && window.hawkesAnalytics.version ? 'running' : 'not yet arrived'));
+      if (interactive < 0 || interactive > 3000) bad('Page not interactive within 3 seconds'); else ok('Page interactive within 3 seconds');
+      for (let i = 0; i < 100 && !(window.hawkesAnalytics && window.hawkesAnalytics.version); i++) await wait(100);
+      if (!(window.hawkesAnalytics && window.hawkesAnalytics.version)) { bad('The SDK never arrived'); return; }
+      window.hawkesAnalytics.flush(); await wait(200); // what the page itself queued goes first, apart from the taps
+      const btn = document.getElementById('quick-click'), base = window.hawkesRequests.length;
+      btn.scrollIntoView({ block: 'center' }); await wait(200);
+      for (let i = 1; i <= 5; i++) { ev('press', 'Quick click ' + i); btn.click(); await wait(150); }
+      ev('state', 'taps done, requests since: ' + (window.hawkesRequests.length - base));
+      if (window.hawkesRequests.length !== base) bad('A request went out while the taps were still coming'); else ok('Nothing sent while the taps kept coming');
+      await wait(3500);
+      const got = carrying('demo_quick');
+      ev('measure', 'requests carrying the taps: ' + got.length + (got[0] ? ' with ' + got[0].events.filter((x) => x === 'demo_quick').length + ' taps' : ''));
+      if (got.length === 1 && got[0].events.filter((x) => x === 'demo_quick').length === 5) ok('Five quick clicks sent one batched request'); else bad('Five quick clicks did not send exactly one batched request (' + got.length + ' requests)');
+      window.hawkesAnalytics.track('demo_hide'); const b2 = window.hawkesRequests.length;
+      ev('press', 'hide the page (visibilitychange to hidden, as a phone does when you switch app)');
+      try { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); } catch (e) { bad('Could not hide the page: ' + e.message); }
+      const sent = window.hawkesRequests.slice(b2).filter((r) => r.events.indexOf('demo_hide') >= 0);
+      ev('state', 'sent at once on hide: ' + sent.length + ' request(s)' + (sent[0] ? ' (' + sent[0].events.join(', ') + ')' : ''));
+      if (sent.length === 1) ok('Hiding the page sent the queued events at once'); else bad('Hiding the page did not send the queued event');
+      delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange'));
+    })().catch((e) => bad('Scenario error: ' + e.message)).then(() => {
+      pt.status = pt.problems.length ? 'lost' : 'won'; ev('finish', pt.status); window.hawkesPlaytest._running = pt._running = false;
+    });
+  }
   window.hawkesPlaytest = {
     version: 2, product: 'hawkes-analytics', _running: false,
-    scenarios: () => [{ id: 'phone', title: 'Phone layout: snippet, opt-out switch, What we send', seconds: 15, tags: ['layout'],
+    scenarios: () => [{ id: 'mobile', title: 'Mobile: async tag, five taps one request, hide sends', seconds: 12, tags: ['mobile', 'batching'],
+      description: 'At phone size: checks the SDK tag is async and the page interactive within 3 seconds, taps Quick click five times and expects one batched request, then hides the page and expects the queued event to be sent at once.' },
+    { id: 'phone', title: 'Phone layout: snippet, opt-out switch, What we send', seconds: 15, tags: ['layout'],
       description: 'Scrolls to the step 1 snippet, the What we send panel and the opt-out switch; taps the switch; checks no Copy button covers code, no sideways scroll, the switch is at least 44px tall and "Sending is off" shows. Best played at 390px wide.' },
     { id: 'smoke', title: 'Press Send and see Hawkes Gen acknowledge the event', seconds: 12, tags: ['smoke'],
       description: 'Loads the page, presses "Send an event to Hawkes Gen" and waits for the acknowledged line in the live list. Fails with "No event reached Hawkes Gen within 10 seconds".' }],
     start(id) {
       if (id === 'phone') return phone();
+      if (id === 'mobile') return mobile();
       if (id !== 'smoke') { pt.status = 'error'; pt.problems = [{ severity: 'bug', message: 'Unknown scenario ' + id }]; pt.run = id; return; }
       pt.run = id; pt.status = 'running'; pt.events = []; pt.problems = []; pt.t0 = Date.now(); window.hawkesPlaytest._running = pt._running = true;
       ev('start', id);

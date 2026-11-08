@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.8 (2026-11-08)
+
+- **Mobile-ready web SDK.** The documented script tag (README, demo) is `async`; calls before it arrives wait in
+  `window.hawkesAnalyticsQ` and are played back (the npm loader and the Unity bridge already did this). Events go out
+  as one request per burst: 2 s after the last event, at most 5 s after the first, or at 20 events; the timer runs only
+  while events wait. When the page hides, queued events are sent at once with `sendBeacon` (`fetch` keepalive as the
+  fallback), also after a `pagehide` that follows a hide. Tests cover batching, the page-hide flush and the async tags.
+- Demo page: reports to the `hawkes-analytics` product, a **Batching** panel (five quick taps, one request) and a
+  `mobile` playtest scenario (async tag, interactive in 3 s, one batched request, hide sends).
+
 ## 1.3.7 (2026-11-08)
 
 - Demo page, for phones: each code block has a header row with a **Copy** button of at least 44px, so Copy no longer

@@ -1,6 +1,6 @@
 /* Hawkes Analytics: the player analytics SDK every Hawkes product's pages load (Hawkes Gen, docs/analytics.md).
  *
- *   <script src="https://hawkesgen.ai/sdk/analytics@1.js" data-product="sickofit" data-build="1.4.2" defer></script>
+ *   <script src="https://hawkesgen.ai/sdk/analytics@1.js" data-product="sickofit" data-build="1.4.2" async></script>
  *   or: import './hawkes-analytics.js'; window.hawkesAnalytics.init({ product: 'sickofit' })   (hawkes-analytics.mjs)
  *
  * No dependencies, never throws into the game, never blocks it. Page views, sessions, active time, device, load
@@ -12,7 +12,10 @@
  * move; a page script's synthetic events don't count), which is sent once per session as first_input. Known automation
  * leftovers (Playwright, Selenium, PhantomJS globals) go in flags.automation. Gen judges bots from these
  * (docs/analytics.md, "Bots").
- * Events go out in batches (every 5 s or 20 events) with sendBeacon; what can't be sent waits in localStorage.
+ * Events go out in one batch per burst: 2 s after the last event (at most 5 s after the first, or at 20 events), with
+ * sendBeacon (fetch keepalive if refused). When the page hides, what is queued goes at once. A timer only runs while
+ * events wait: no polling. What can't be sent waits in localStorage.
+ * The tag is async: calls made before it arrives wait in window.hawkesAnalyticsQ as [method, ...args] and are played back.
  * No cookies, no fingerprinting: an anonymous random id in localStorage. hawkesAnalytics.optOut() stops everything.
  */
 (function () {
@@ -33,7 +36,7 @@
   var ENDPOINT = 'https://hawkesgen.ai/v1/analytics/collect';
   var SESSION_IDLE = 30 * 60e3; // 30 minutes without activity ends a session
   var ACTIVE_IDLE = 60e3; // active time stops 60 s after the last input
-  var FLUSH_MS = 5e3, FLUSH_AT = 20, MAX_BATCH = 200, MAX_BYTES = 60000;
+  var FLUSH_MS = 2e3, FLUSH_MAX_MS = 5e3, FLUSH_AT = 20, MAX_BATCH = 200, MAX_BYTES = 60000;
   var OUTBOX_MAX = 40, OUTBOX_BYTES = 300000, BUFFER_MAX = 500;
   var ASK_SNOOZE = 7 * 864e5;
   var EVENT_NAME = /^[a-z][a-z0-9_]{1,39}$/;
@@ -200,7 +203,7 @@
   }
 
   // ------------------------------------------------------------------ events and the queue
-  var queue = [], recent = [], ctx = {}, screenName, timer = null;
+  var queue = [], recent = [], ctx = {}, screenName, timer = null, firstQueued = 0;
   var api = { version: ANALYTICS_VERSION, debugLog: [] };
   function emit(name, props, t) {
     if (optedOut || !sess) return;
@@ -219,7 +222,13 @@
       try { console.log('[hawkes-analytics]', name, props || ''); } catch (x) { /* no console */ }
     }
     if (queue.length >= FLUSH_AT) flush();
-    else if (!timer) timer = setTimeout(flush, FLUSH_MS);
+    else {
+      // Quiet for 2 s sends the burst as one request; a steady trickle still goes 5 s after its first event.
+      var t0 = now();
+      if (!firstQueued) firstQueued = t0;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(flush, Math.max(0, Math.min(FLUSH_MS, firstQueued + FLUSH_MAX_MS - t0)));
+    }
   }
   function header(sid) {
     var h = { product: cfg.product, build: build(), env: envOf(loc.hostname, loc.pathname), anon: anon, session: sid, flags: flags(), device: device(), sdk: 'js/' + ANALYTICS_VERSION };
@@ -271,6 +280,7 @@
   }
   function flush() {
     if (timer) { clearTimeout(timer); timer = null; }
+    firstQueued = 0;
     if (optedOut || !queue.length || !sess) return;
     if (!cfg.product) {
       warn('product', 'No product id, so nothing is being sent to Hawkes Analytics.',
@@ -364,7 +374,8 @@
   function exit() {
     // The page hides or goes away: what the player last did, the game's state, then send it all. Hidden and shown
     // again with nothing in between (an embedded browser flickering, a quick alt-tab) says nothing new: no second exit.
-    if (exited || optedOut || !sess) return;
+    if (optedOut || !sess) return;
+    if (exited) return flush(); // already hidden (visibilitychange, then pagehide): send anything queued since
     exited = true;
     if (sess.seq === exitSeq) return;
     var a = activeSec();

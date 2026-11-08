@@ -626,3 +626,67 @@ test('opt-out: nothing is sent, queued or kept, and the waiting queue is deleted
   assert.equal(ls.getItem('hawkes.outbox'), null, 'nothing queued');
   assert.equal(p.a.config().optedOut, true);
 });
+
+test('batching: five quick events are one request; a burst waits for quiet; a steady trickle still goes within 5 s', () => {
+  const p = page();
+  p.advance(2000);
+  assert.equal(p.sent.length, 1, 'the page-load events go out together');
+  for (let i = 0; i < 5; i++) { p.a.track('demo_click', { i }); p.advance(300); }
+  assert.equal(p.sent.length, 1, 'nothing goes out while the clicks keep coming');
+  p.advance(2000);
+  assert.equal(p.sent.length, 2, 'one request for the five clicks');
+  assert.deepEqual(p.sent[1].events.map((e: any) => e.name), ['demo_click', 'demo_click', 'demo_click', 'demo_click', 'demo_click']);
+  p.advance(60_000);
+  assert.equal(p.sent.length, 2, 'an idle page sends nothing more: no polling');
+
+  // One event every second never goes quiet: the 5 s cap sends it anyway.
+  for (let i = 0; i < 6; i++) { p.a.track('tick'); p.advance(1000); }
+  assert.equal(p.sent.length, 3, 'sent 5 s after the first event of the trickle');
+  assert.ok(p.sent[2].events.length >= 5);
+  // 20 events go at once.
+  for (let i = 0; i < 20; i++) p.a.track('burst');
+  assert.equal(p.sent.length, 4);
+});
+
+test('page hide: queued events are sent at once with sendBeacon, with the exit; pagehide sends what came after', () => {
+  const p = page();
+  p.advance(2000);
+  const before = p.sent.length;
+  p.a.track('level_end_click');
+  assert.equal(p.sent.length, before, 'still waiting for the timer');
+  p.hide();
+  assert.equal(p.sent.length, before + 1, 'hiding sent them, one request');
+  assert.deepEqual(p.sent[before].events.map((e: any) => e.name), ['level_end_click', 'exit', 'session_end']);
+  assert.equal(p.fetched.length, 0, 'sendBeacon took it');
+  p.a.track('late');
+  p.fire('win', 'pagehide');
+  assert.equal(p.sent.length, before + 2, 'pagehide after a hide still flushes what came since');
+  assert.deepEqual(p.sent[before + 1].events.map((e: any) => e.name), ['late']);
+  p.advance(60_000);
+  assert.equal(p.sent.length, before + 2);
+});
+
+test('page hide: when sendBeacon refuses, fetch with keepalive carries the batch', () => {
+  const p = page({ beacon: false });
+  p.a.track('before_hide');
+  p.fire('win', 'pagehide');
+  assert.equal(p.sent.length, 0);
+  assert.equal(p.fetched.length, 1);
+  assert.equal(p.fetched[0].init.keepalive, true);
+  assert.equal(p.fetched[0].init.credentials, 'omit');
+  assert.ok(JSON.parse(p.fetched[0].init.body).events.some((e: any) => e.name === 'before_hide'));
+});
+
+test('async: calls made before the script arrives are played back, in order, and the documented tags are async', () => {
+  const p = page({ before: (w) => { w.hawkesAnalyticsQ = [['track', 'menu_opened'], ['screen', 'menu']]; } });
+  p.a.flush();
+  const names = p.names();
+  assert.ok(names.indexOf('menu_opened') > names.indexOf('session_start'));
+  assert.ok(names.includes('screen'));
+  for (const f of ['README.md', 'example/index.html', 'hawkes-analytics.js']) {
+    const text = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const tags = text.match(/<script src="https:\/\/hawkesgen\.ai\/sdk\/analytics@1\.js"[^>]*>|&lt;script src="https:\/\/hawkesgen\.ai\/sdk\/analytics@1\.js"[^&]*&gt;/g) ?? [];
+    assert.ok(tags.length > 0, `${f} shows the script tag`);
+    for (const t of tags) assert.ok(/\basync\b/.test(t) && !/\bdefer\b/.test(t), `${f}: ${t} is async`);
+  }
+});
