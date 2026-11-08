@@ -19,8 +19,20 @@ Pick your kind of game. Each one is copy, paste, play once, and see it in Hawkes
 Paste this in your page's `<head>`:
 
 ```html
-<script src="https://hawkesgen.ai/sdk/analytics@1.js" data-product="my-game" data-build="1.0.0" defer></script>
+<script src="https://hawkesgen.ai/sdk/analytics@1.js" data-product="my-game" data-build="1.0.0" async></script>
 ```
+
+The tag is `async`: it never holds up your page, even on a slow phone connection. Calls your game makes before it
+arrives are not lost: push them as `[method, ...args]` and the SDK plays them back when it starts.
+
+```html
+<script>window.hawkesAnalyticsQ = window.hawkesAnalyticsQ || []; hawkesAnalyticsQ.push(['track', 'menu_opened']);</script>
+```
+
+Events are sent in batches, not one request each: a burst of events goes out as one request 2 seconds after the last
+one (at most 5 seconds after the first, or at once at 20 events). When the player hides the tab, switches app or
+leaves, whatever is still waiting is sent right then with `navigator.sendBeacon` (a `fetch` with `keepalive` if the
+browser refuses). A timer runs only while events are waiting; an idle page makes no requests.
 
 Open the page with `?hawkes-analytics-debug=1` on the end and look in the browser console: each event is logged as it
 happens. When the player can play, add `hawkesAnalytics.ready();` to your game's code.
@@ -84,7 +96,7 @@ request into beta with the line or the package, for web and Unity projects alike
 One tag in every page (game pages and website pages alike):
 
 ```html
-<script src="https://hawkesgen.ai/sdk/analytics@1.js" data-product="my-game" data-build="1.0.0" defer></script>
+<script src="https://hawkesgen.ai/sdk/analytics@1.js" data-product="my-game" data-build="1.0.0" async></script>
 ```
 
 `data-product` is the project's name in Hawkes Gen. That alone gives page views, sessions, active time, referrers and

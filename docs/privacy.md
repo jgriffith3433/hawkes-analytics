@@ -76,7 +76,10 @@ this as a setting. The demo page has the toggle.
 
 ## Offline and reliability
 
-- Events are batched (every 5 seconds or 20 events) and sent with `sendBeacon`, which survives the page closing.
+- Events are batched: a burst goes out as one request 2 seconds after its last event (at most 5 seconds after its first,
+  or at once at 20 events), with `sendBeacon`, which survives the page closing. When the page hides (`visibilitychange`
+  to hidden, `pagehide`), what is queued is sent at once (`fetch` with `keepalive` if `sendBeacon` is refused). A timer
+  runs only while events wait.
 - If the browser is offline, `sendBeacon` is refused or the server answers 5xx, the batch waits in localStorage
   (`hawkes.outbox`: at most 40 batches or about 300 KB, oldest dropped first) and is sent when the browser fires `online` or
   on the next visit. There is no retry timer: an idle page makes no requests.
