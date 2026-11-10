@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.11 (2026-11-10)
+
+- `tools/check.mjs` (run by `npm test` and the package build) evaluates the demo's head scripts with no network and fails
+  if `window.hawkesPlaytest` is not defined synchronously or a scenario (`smoke`, `phone`, `mobile`) is missing, naming it.
+  `node tools/check.mjs <file.html>` checks another copy. No SDK or Unity code changed.
+
 ## 1.3.10 (2026-11-10)
 
 - Demo playtests exercise the page: `smoke`, `phone` and `mobile` all press Send and wait for the acknowledged row
