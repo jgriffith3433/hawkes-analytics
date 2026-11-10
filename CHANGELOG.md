@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.9 (2026-11-10)
+
+- Demo page: `window.hawkesPlaytest` is defined synchronously in `<head>`, before and independent of the SDK script, so
+  a failed SDK load or a later body-script error cannot leave the contract missing. Scenario ids (`smoke`, `phone`,
+  `mobile`) and the request counter stay as they were. No SDK or Unity code changed.
+
 ## 1.3.8 (2026-11-08)
 
 - **Mobile-ready web SDK.** The documented script tag (README, demo) is `async`; calls before it arrives wait in
