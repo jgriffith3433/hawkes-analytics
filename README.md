@@ -165,6 +165,14 @@ In the Editor and outside WebGL nothing is sent (`logOutsideWebGL` in the settin
 [docs/events.md](docs/events.md) is the event catalogue and naming guide: the recommended events for a game (level_start,
 level_end, death, purchase and more) with their fields, and the rules for names.
 
+## Listening to events
+
+`hawkesAnalytics.on(type, fn)` and `off(type, fn)` watch events on their way; `type` is `queued`, `batched`, `sent`,
+`acked` or `dropped`. `fn` gets `{ id, name, fields, batch, queuedAt, <type>At }` (a copy: changing it changes nothing).
+`dropped` adds `reason`: `opted out`, `bad name`, `no product`, `queue full` or `network gave up`. Callbacks run inline, no
+timers, and a throwing one is ignored. With an `acked` listener, batches go by `fetch` instead of a beacon so the answer
+can be seen. Through `@hawkesgen/analytics`, calls made before the script loads are queued and registered when it starts.
+
 ## Debugging
 
 `?hawkes-analytics-debug=1` on any page (or `debug: true`) logs each event to the console and keeps them on

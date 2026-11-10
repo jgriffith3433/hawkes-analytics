@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0 (2026-11-10)
+
+- Listener API: `hawkesAnalytics.on(type, fn)` / `off(type, fn)` for `queued`, `batched`, `sent`, `acked` and `dropped`.
+  Each callback gets `{ id, name, fields, batch, queuedAt, <type>At }` and, for `dropped`, a plain `reason` (`opted out`,
+  `bad name`, `no product`, `queue full`, `network gave up`). Fired inline from the queue, batch, send and response paths
+  (no timers). While an `acked` listener exists, batches go by `fetch` (a beacon has no response). The npm loader queues
+  `on`/`off` before the script loads. Nothing sent changes; pages with no listener behave as before.
+
 ## 1.3.11 (2026-11-10)
 
 - `tools/check.mjs` (run by `npm test` and the package build) evaluates the demo's head scripts with no network and fails

@@ -41,6 +41,7 @@
       const cfg = h && h.config ? h.config() : {};
       const finish = (ok, text) => { acks[n] = { ok, text }; if (out) out.textContent = text; if (typeof window.__hawkesDemoUi === 'function') window.__hawkesDemoUi(); sendDone({ ok, text, n }); };
       if (cfg.optedOut) {
+        demoCall('track', 'demo_send', { n }); // dropped with 'opted out' for listeners; nothing is sent
         if (out) out.textContent = 'Opted out: nothing was sent.';
         finish(false, 'Opted out: nothing was sent.');
         return;
@@ -369,6 +370,7 @@ hawkesAnalytics.track('demo_click');</pre>
        it only proves the road is open.</p>
     <div class="row"><button id="send-event" class="primary">Send an event to Hawkes Gen</button></div>
     <p id="send-result" role="status">Nothing sent yet.</p>
+    <p id="listen-log" role="log" aria-label="Listener log"></p>
     <div class="row">
       <button data-call="ready">ready()</button>
       <button data-call="levelStart">levelStart(1)</button>
@@ -547,6 +549,14 @@ hawkesAnalytics.track('demo_click');</pre>
   document.getElementById('send-event').addEventListener('click', () => window.hawkesPlaytest.sendToGen());
   document.getElementById('bad-name').addEventListener('click', () => window.hawkesPlaytest.sendBadName());
   window.__hawkesDemoUi = () => { show(true); privacy(); };
+  // Listener API: queued, batched, sent, acked, dropped for the events this page sends (demo_ and bad names).
+  { const log = document.getElementById('listen-log'), pt = window.hawkesPlaytest;
+    ['queued', 'batched', 'sent', 'acked', 'dropped'].forEach((t) => ((f) => { const a = window.hawkesAnalytics; if (a && a.on) a.on(t, f); else (window.hawkesAnalyticsQ = window.hawkesAnalyticsQ || []).push(['on', t, f]); })((i) => {
+      if (i.name !== 'demo_send') return;
+      const line = t + ': ' + i.name + (i.reason ? ' (' + i.reason + ')' : '');
+      log.textContent += (log.textContent ? ' → ' : '') + line;
+      if (pt && pt.events) pt.events.push({ t: +((Date.now() - pt.t0) / 1000).toFixed(2), type: 'listener', detail: line });
+    })); }
 
   // The Unity sample, on the page: the same three calls, and a list of every call, newest first (see Samples~/BasicEvents).
   const sample = {

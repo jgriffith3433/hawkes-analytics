@@ -12,7 +12,7 @@
 export const SDK_MAJOR = 1;
 export const SDK_URL = `https://hawkesgen.ai/sdk/analytics@${SDK_MAJOR}.js`;
 
-const METHODS = ['init', 'track', 'screen', 'setContext', 'loadStart', 'ready', 'levelStart', 'levelEnd', 'death', 'choice', 'feature', 'video', 'feedback', 'error', 'optOut', 'optIn', 'internal', 'flush', 'activity', 'identify', 'frustration', 'engage'];
+const METHODS = ['init', 'track', 'screen', 'setContext', 'loadStart', 'ready', 'levelStart', 'levelEnd', 'death', 'choice', 'feature', 'video', 'feedback', 'error', 'optOut', 'optIn', 'internal', 'flush', 'activity', 'identify', 'frustration', 'engage', 'on', 'off'];
 const QUEUE_MAX = 500;
 
 const win = () => (typeof window !== 'undefined' && window.document ? window : null);

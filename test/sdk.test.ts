@@ -254,6 +254,25 @@ test('the offline queue: kept in localStorage, capped, sent on the next visit', 
   return new Promise<void>((r) => setTimeout(() => { assert.equal(JSON.parse(ls2.getItem('hawkes.outbox')!).length, 1); r(); }, 10));
 });
 
+test('listeners: queued, batched, sent, acked in order; dropped with a reason', async () => {
+  const p = page();
+  p.w.fetch = async () => ({ ok: true, status: 200 });
+  const seen: string[] = [], drops: any[] = [];
+  for (const t of ['queued', 'batched', 'sent', 'acked']) p.a.on(t, (i: any) => seen.push(t + ':' + i.name));
+  p.a.on('dropped', (i: any) => drops.push(plainOf(i)));
+  p.a.init({ product: 'x' });
+  await new Promise((r) => setTimeout(r, 5));
+  seen.length = 0;
+  p.a.track('one', { a: 1 });
+  p.a.flush();
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(seen, ['queued:one', 'batched:one', 'sent:one', 'acked:one']);
+  p.a.track('Bad Name');
+  p.a.optOut();
+  p.a.track('two');
+  assert.deepEqual(drops.map((d) => [d.name, d.reason]), [['Bad Name', 'bad name'], ['two', 'opted out']]);
+});
+
 test('opt-out stops everything and is remembered; opt-in starts a session', () => {
   const ls = new MemStorage(), clock = { t: T0 };
   const p = page({ ls, clock });

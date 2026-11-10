@@ -20,9 +20,9 @@
  */
 (function () {
   'use strict';
-  var ANALYTICS_VERSION = 3;
+  var ANALYTICS_VERSION = 4;
   var w = typeof window !== 'undefined' ? window : null;
-  var METHODS = ['init', 'config', 'track', 'screen', 'setContext', 'loadStart', 'ready', 'levelStart', 'levelEnd', 'death', 'choice', 'feature', 'video', 'feedback', 'error', 'ask', 'optOut', 'optIn', 'internal', 'flush', 'activity', 'identify', 'frustration', 'engage'];
+  var METHODS = ['init', 'config', 'track', 'screen', 'setContext', 'loadStart', 'ready', 'levelStart', 'levelEnd', 'death', 'choice', 'feature', 'video', 'feedback', 'error', 'ask', 'optOut', 'optIn', 'internal', 'flush', 'activity', 'identify', 'frustration', 'engage', 'on', 'off'];
   if (!w || !w.document) {
     // Server-side rendering, workers, Node: a do-nothing stand-in so imports never fail.
     var stub = { version: ANALYTICS_VERSION, debugLog: [] };
@@ -205,6 +205,23 @@
   // ------------------------------------------------------------------ events and the queue
   var queue = [], recent = [], ctx = {}, screenName, timer = null, firstQueued = 0;
   var api = { version: ANALYTICS_VERSION, debugLog: [] };
+  // Listeners: on('queued' | 'batched' | 'sent' | 'acked' | 'dropped', fn). Called inline from the code paths below, never from a timer.
+  var listeners = { queued: [], batched: [], sent: [], acked: [], dropped: [] }, batchSeq = 0;
+  function fire(type, items, reason) {
+    var ls_ = listeners[type];
+    if (!ls_.length) return;
+    for (var i = 0; i < items.length; i++) {
+      var info = items[i].info;
+      info[type + 'At'] = now();
+      if (reason) info.reason = reason;
+      for (var j = 0; j < ls_.length; j++) {
+        try { ls_[j](assign({}, info, { fields: info.fields ? assign({}, info.fields) : {} })); } catch (e) { /* a listener never breaks the SDK */ }
+      }
+    }
+  }
+  function dropName(name, reason) {
+    if (listeners.dropped.length) fire('dropped', [{ info: { id: null, name: name, fields: {}, batch: null, queuedAt: null } }], reason);
+  }
   function emit(name, props, t) {
     if (optedOut || !sess) return;
     t = t || now();
@@ -212,8 +229,10 @@
     var e = { name: name, seq: sess.seq++, t: t, active: Math.round(sess.active), page: loc.pathname, screen: screenName, ctx: assign({}, ctx) };
     if (props && typeof props === 'object') e.props = props;
     save();
-    queue.push({ sid: sess.id, e: e });
-    if (queue.length > BUFFER_MAX) queue.splice(0, queue.length - BUFFER_MAX);
+    var item = { sid: sess.id, e: e, info: { id: sess.id + ':' + e.seq, name: name, fields: e.props ? assign({}, e.props) : {}, batch: null, queuedAt: t } };
+    queue.push(item);
+    fire('queued', [item]);
+    if (queue.length > BUFFER_MAX) fire('dropped', queue.splice(0, queue.length - BUFFER_MAX), 'queue full');
     recent.push({ name: name, t: t, screen: screenName, level: ctx.level });
     if (recent.length > 20) recent.shift();
     if (cfg.debug) {
@@ -236,10 +255,10 @@
     if (entryNext && sid === sess.id) h.entry = sess.entry;
     return h;
   }
-  function batches(items) {
+  function batches(items, groups) {
     // One session per batch, at most 200 events and about 60 KB each.
-    var out = [], head = null, cur = [], size = 0;
-    var close = function () { if (cur.length) out.push(assign({}, head, { events: cur })); cur = []; };
+    var out = [], head = null, cur = [], size = 0, members = [];
+    var close = function () { if (cur.length) { out.push(assign({}, head, { events: cur })); groups.push(members); } cur = []; members = []; };
     for (var i = 0; i < items.length; i++) {
       var n = JSON.stringify(items[i].e).length + 1;
       if (n > MAX_BYTES / 2) continue; // no event is this big (the server trims props to 16 KB anyway)
@@ -249,19 +268,27 @@
         size = JSON.stringify(head).length + 20;
       }
       cur.push(items[i].e);
+      members.push(items[i]);
       size += n;
     }
     close();
     return out;
   }
-  function deliver(body) {
+  function deliver(body, group) {
     if (nav.onLine === false) return outbox(body);
     var sent = false;
-    try { sent = !!(nav.sendBeacon && nav.sendBeacon(cfg.endpoint, body)); } catch (e) { sent = false; }
-    if (sent) return;
+    // A beacon has no response to read, so a page that listens for 'acked' sends with fetch instead.
+    if (!(group && listeners.acked.length)) {
+      try { sent = !!(nav.sendBeacon && nav.sendBeacon(cfg.endpoint, body)); } catch (e) { sent = false; }
+    }
+    if (sent) { if (group) fire('sent', group); return; }
     try {
-      w.fetch(cfg.endpoint, { method: 'POST', body: body, keepalive: body.length < 60000, headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, credentials: 'omit' })
-        .then(function (r) { if (r.status >= 500) outbox(body); }, function () { outbox(body); });
+      var p = w.fetch(cfg.endpoint, { method: 'POST', body: body, keepalive: body.length < 60000, headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, credentials: 'omit' });
+      if (group) fire('sent', group);
+      p.then(function (r) {
+        if (r.status >= 500) outbox(body);
+        else if (group) fire(r.ok ? 'acked' : 'dropped', group, 'network gave up');
+      }, function () { outbox(body); });
     } catch (e) { outbox(body); }
   }
   function outbox(body) {
@@ -285,14 +312,19 @@
     if (!cfg.product) {
       warn('product', 'No product id, so nothing is being sent to Hawkes Analytics.',
         'Add data-product="my-game" to the script tag (my-game is your project\'s name in Hawkes Gen), or call hawkesAnalytics.init({ product: \'my-game\' }).');
+      // The events stay queued for when a product arrives; each is reported once.
+      if (listeners.dropped.length) fire('dropped', queue.filter(function (q) { return !q.noProduct && (q.noProduct = true); }), 'no product');
       return;
     }
-    var list = batches(queue);
+    var groups = [], list = batches(queue, groups);
     queue = [];
     for (var i = 0; i < list.length; i++) {
       var body = JSON.stringify(list[i]);
       if (cfg.debug) for (var j = 0; j < list[i].events.length; j++) list[i].events[j].sent = now();
-      deliver(body);
+      var bid = 'b' + (++batchSeq) + '_' + now().toString(36);
+      for (var k = 0; k < groups[i].length; k++) groups[i][k].info.batch = bid;
+      fire('batched', groups[i]);
+      deliver(body, groups[i]);
     }
     if (list.length) entryNext = false;
   }
@@ -455,8 +487,10 @@
         var fix = name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^[^a-z]+|_+$/g, '').slice(0, 40);
         warn('name:' + name.slice(0, 40), 'The event name "' + name.slice(0, 40) + '" was skipped (it ' + why + '): names are 2 to 40 characters, start with a lowercase letter, and use only a-z, 0-9 and _.',
           'Rename it, for example "' + (EVENT_NAME.test(fix) ? fix : 'shop_purchase') + '".');
+        dropName(name.slice(0, 40), 'bad name');
         return;
       }
+      if (optedOut) return dropName(name, 'opted out');
       touchSession(now());
       emit(name, props && typeof props === 'object' ? assign({}, props) : undefined);
     },
@@ -493,10 +527,13 @@
     feedback: function (o) { o = o || {}; fns.track('feedback', assign({}, o, { rating: o.rating, text: str(o.text, 2000), context: str(o.context, 200) })); },
     error: function (err, source, props) { reportError(err && err.message || err, err && err.stack, source || 'game', props); },
     ask: function (o) { return ask(o); },
-    optOut: function () { optedOut = true; queue = []; set(ls, 'hawkes.optout', '1'); set(ls, 'hawkes.outbox', null); set(ss, 'hawkes.session', null); },
+    optOut: function () { optedOut = true; var gone = queue; queue = []; fire('dropped', gone, 'opted out'); set(ls, 'hawkes.optout', '1'); set(ls, 'hawkes.outbox', null); set(ss, 'hawkes.session', null); },
     optIn: function () { var was = optedOut; optedOut = false; set(ls, 'hawkes.optout', null); if (was && started) newSession(now()); else start(); },
     internal: function (on) { set(ls, 'hawkes.internal', on === false ? null : '1'); },
     flush: function () { flush(); },
+    // Listen to events on their way: type is queued, batched, sent, acked or dropped; fn gets { id, name, fields, batch, queuedAt, ... }.
+    on: function (type, fn) { if (listeners[type] && typeof fn === 'function' && listeners[type].indexOf(fn) < 0) listeners[type].push(fn); },
+    off: function (type, fn) { var l = listeners[type], i = l ? l.indexOf(fn) : -1; if (i >= 0) l.splice(i, 1); },
     // Input the SDK can't see itself (a game in a sandboxed frame forwards its own): keeps active time and the session.
     activity: function () { input(null); },
     // The site's own account id (no email, no name): sessions are tied to it from now on; null on sign-out.
