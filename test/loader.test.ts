@@ -119,3 +119,24 @@ test('a script that fails to load warns in plain words and the game goes on', as
   assert.equal(warns.length, 1);
   assert.match(warns[0], /Hawkes Gen's script could not be loaded from https:\/\/hawkesgen\.ai\/sdk\/analytics@1\.js, so no analytics are sent \(the game is not affected\)\. Check the player's connection or an ad blocker/);
 });
+
+test('check.mjs fails the build when the demo lacks the playtest contract or a scenario', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const os = await import('node:os');
+  const demo = fs.readFileSync(path.join(ROOT, 'example', 'index.html'), 'utf8');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'demo-'));
+  const run = (html: string) => {
+    const f = path.join(dir, 'index.html');
+    fs.writeFileSync(f, html);
+    return spawnSync(process.execPath, [path.join(ROOT, 'tools', 'check.mjs'), f], { encoding: 'utf8' });
+  };
+  try {
+    assert.equal(run(demo).status, 0);
+    const none = run(demo.replaceAll('window.hawkesPlaytest =', 'window.somethingElse ='));
+    assert.notEqual(none.status, 0);
+    assert.match(none.stderr, /does not define window\.hawkesPlaytest synchronously/);
+    const noPhone = run(demo.replace("id: 'phone'", "id: 'phoney'"));
+    assert.notEqual(noPhone.status, 0);
+    assert.match(noPhone.stderr, /missing the scenario "phone"/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

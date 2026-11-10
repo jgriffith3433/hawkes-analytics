@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UPM = path.join(ROOT, 'Packages', 'com.hawkes.analytics');
@@ -56,10 +57,37 @@ const guids = new Map();
 })(UPM);
 
 // The privacy story: every field the SDK puts in a batch is in docs/privacy.md and on the demo page's "What we send" panel.
-const privacy = read('docs/privacy.md'), demo = read('example/index.html');
+const demoPath = process.argv[2] ? path.resolve(process.argv[2]) : path.join(ROOT, 'example', 'index.html');
+const privacy = read('docs/privacy.md'), demo = fs.readFileSync(demoPath, 'utf8');
 for (const f of ['product', 'build', 'env', 'anon', 'session', 'user', 'sdk', 'entry', 'flags', 'device', 'events']) {
   if (!privacy.includes(`| \`${f}\``)) fail(`docs/privacy.md does not list the batch field ${f}`);
   if (!new RegExp(`\\['${f}(\\[\\]|')`).test(demo)) fail(`example/index.html's What we send panel does not list ${f}`);
+}
+
+// The playtest contract: the demo is published as the beta site and Studio plays it, so window.hawkesPlaytest must exist as
+// soon as the head scripts have run (no waiting for load or network) and list every scenario Studio plays. Only the
+// scripts without a src are evaluated, in a bare fake window with no network.
+const SCENARIOS = ['smoke', 'phone', 'mobile'];
+{
+  const head = demo.split(/<body[\s>]/i)[0];
+  const noop = () => {};
+  const stub = new Proxy(noop, { get: (_, k) => (k === Symbol.toPrimitive ? () => '' : stub), apply: () => stub, construct: () => stub });
+  const win = { location: { search: '', href: 'http://localhost/', origin: 'http://localhost' }, navigator: { userAgent: 'check' },
+    document: { readyState: 'loading', addEventListener: noop, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], createElement: () => stub, head: stub, body: stub, documentElement: stub },
+    addEventListener: noop, URLSearchParams, setTimeout: noop, clearTimeout: noop, setInterval: noop, fetch: () => new Promise(noop), console: { log: noop, warn: noop, error: noop }, Date, Math, JSON, Object, Array, crypto: { getRandomValues: (a) => a } };
+  win.window = win; win.self = win; win.globalThis = win;
+  vm.createContext(win);
+  for (const m of head.matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi)) {
+    try { vm.runInContext(m[1], win, { timeout: 2000 }); } catch (e) { fail(`the demo's head script threw before window.hawkesPlaytest was defined: ${e && e.message || e}`); break; }
+  }
+  const pt = win.hawkesPlaytest;
+  if (!pt || typeof pt.scenarios !== 'function' || typeof pt.start !== 'function') {
+    fail(`${path.relative(ROOT, demoPath)} does not define window.hawkesPlaytest synchronously: Studio could not play the beta site (it needs scenarios() and start() from a head script, not after load)`);
+  } else {
+    let ids = [];
+    try { ids = pt.scenarios().map((s) => s.id); } catch (e) { fail(`window.hawkesPlaytest.scenarios() threw: ${e && e.message || e}`); }
+    for (const id of SCENARIOS) if (!ids.includes(id)) fail(`window.hawkesPlaytest is missing the scenario "${id}" (found: ${ids.join(', ') || 'none'})`);
+  }
 }
 
 if (problems.length) {
