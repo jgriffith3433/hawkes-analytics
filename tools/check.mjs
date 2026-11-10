@@ -56,6 +56,11 @@ const guids = new Map();
   }
 })(UPM);
 
+// Docs sources the package build renders to dist/docs/ (tools/docs.mjs).
+for (const f of ['quickstart.md', 'events.md', 'privacy.md', 'api.md']) {
+  if (!fs.existsSync(path.join(ROOT, 'docs', f))) fail(`docs/${f} is missing (beta docs pages are built from it)`);
+}
+
 // The privacy story: every field the SDK puts in a batch is in docs/privacy.md and on the demo page's "What we send" panel.
 const demoPath = process.argv[2] ? path.resolve(process.argv[2]) : path.join(ROOT, 'example', 'index.html');
 const privacy = read('docs/privacy.md'), demo = fs.readFileSync(demoPath, 'utf8');
@@ -67,7 +72,7 @@ for (const f of ['product', 'build', 'env', 'anon', 'session', 'user', 'sdk', 'e
 // The playtest contract: the demo is published as the beta site and Studio plays it, so window.hawkesPlaytest must exist as
 // soon as the head scripts have run (no waiting for load or network) and list every scenario Studio plays. Only the
 // scripts without a src are evaluated, in a bare fake window with no network.
-const SCENARIOS = ['smoke', 'phone', 'mobile'];
+const SCENARIOS = ['smoke', 'phone', 'mobile', 'docs'];
 {
   const head = demo.split(/<body[\s>]/i)[0];
   const noop = () => {};

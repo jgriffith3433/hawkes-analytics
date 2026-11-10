@@ -1,6 +1,6 @@
 {
   "name": "@hawkesgen/analytics",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Hawkes Analytics: player analytics for web and Unity WebGL games in one line. Sessions, retention, funnels, levels, deaths, errors, feedback and what gets in players' way, read in Hawkes Studio's Analytics tab. https://hawkesgen.ai",
   "type": "module",
   "main": "./index.mjs",
@@ -22,6 +22,7 @@
   "scripts": {
     "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.ts\" && node tools/check.mjs",
     "check": "node tools/check.mjs",
+    "docs": "node tools/docs.mjs",
     "pack": "mkdir -p dist && npm pack --pack-destination dist && cd Packages/com.hawkes.analytics && npm pack --pack-destination ../../dist"
   },
   "engines": {
