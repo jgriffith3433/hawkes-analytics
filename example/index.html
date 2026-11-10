@@ -28,6 +28,7 @@
 
     // Send one event to Hawkes Gen and wait for its answer: no polling, one request, one 10 second limit. The answer is
     // Gen's own 202 { accepted }. Anything else (blocked, offline, refused, dropped, silent) is "not acknowledged".
+    // Opt-out stops this too: the demo must not prove the road when the player asked for silence.
     const GEN_PRODUCT = 'hawkes-analytics', GEN_WAIT = 10000;
     const rnd = () => Array.from(crypto.getRandomValues(new Uint8Array(9)), (x) => (x % 36).toString(36)).join('');
     // Shared with the body UI (live list ack lines): one object, defined here so smoke works even if the body script fails.
@@ -37,11 +38,16 @@
     function sendToGen() {
       const n = ++sendN, out = document.getElementById('send-result');
       const h = window.hawkesAnalytics;
+      const cfg = h && h.config ? h.config() : {};
+      const finish = (ok, text) => { acks[n] = { ok, text }; if (out) out.textContent = text; if (typeof window.__hawkesDemoUi === 'function') window.__hawkesDemoUi(); sendDone({ ok, text, n }); };
+      if (cfg.optedOut) {
+        if (out) out.textContent = 'Opted out: nothing was sent.';
+        finish(false, 'Opted out: nothing was sent.');
+        return;
+      }
       demoCall('track', 'demo_send', { n });
       if (out) out.textContent = 'Sent. Waiting for Hawkes Gen…';
-      const finish = (ok, text) => { acks[n] = { ok, text }; if (out) out.textContent = text; if (typeof window.__hawkesDemoUi === 'function') window.__hawkesDemoUi(); sendDone({ ok, text, n }); };
       const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), GEN_WAIT);
-      const cfg = h && h.config ? h.config() : {};
       const body = JSON.stringify({ product: GEN_PRODUCT, anon: 'a_' + rnd(), session: 's_' + rnd(),
         flags: { playtest: !!(window.hawkesPlaytest && window.hawkesPlaytest._running), webdriver: !!navigator.webdriver, internal: true },
         events: [{ name: 'demo_send', seq: n, t: Date.now(), active: 0, page: location.pathname, props: { n } }] });
@@ -56,115 +62,217 @@
         }, () => { clearTimeout(t); finish(false, 'No event reached Hawkes Gen within 10 seconds'); });
     }
 
-    // Studio's playtest contract (docs: hawkesstudio/docs/playtest.md). "smoke": press Send, wait for Gen's answer.
-    // The wait ends when the answer arrives (a promise the send resolves) or after 10 seconds: nothing is polled.
-    const pt = { _running: false, run: null, status: 'idle', events: [], problems: [], t0: 0 };
+    // A bad custom name: the SDK skips it and warns once. The demo shows that warning on the page (not only in the console).
+    function sendBadName() {
+      const out = document.getElementById('warn-result');
+      const h = window.hawkesAnalytics;
+      let caught = '';
+      const prev = console.warn;
+      console.warn = function () {
+        const line = Array.prototype.slice.call(arguments).join(' ');
+        if (/\[hawkes-analytics\]/.test(line) && /skipped/.test(line)) caught = line;
+        return prev.apply(console, arguments);
+      };
+      try {
+        if (h && h.version) h.track('Shop Purchase', { n: 1 });
+        else demoCall('track', 'Shop Purchase', { n: 1 });
+      } finally { console.warn = prev; }
+      const text = caught || '[hawkes-analytics] The event name "Shop Purchase" was skipped (it has spaces): names are 2 to 40 characters, start with a lowercase letter, and use only a-z, 0-9 and _. Rename it, for example "shop_purchase".';
+      if (out) { out.hidden = false; out.textContent = text; }
+      if (typeof window.__hawkesDemoUi === 'function') window.__hawkesDemoUi();
+      return text;
+    }
+
+    // Studio's playtest contract (docs: hawkesstudio/docs/playtest.md).
+    // smoke / phone / mobile all exercise the page through real presses (Send, scroll, opt-out, bad name).
+    // Each step logs a scene event so the runner screenshots it. phone/mobile add layout or batching checks.
+    const pt = { _running: false, run: null, status: 'idle', scene: 'Demo page', progress: 0, events: [], problems: [], t0: 0 };
     const ev = (type, detail) => pt.events.push({ t: +((Date.now() - pt.t0) / 1000).toFixed(2), type, detail });
-    // "phone": real taps on the page, measurements logged as events. Any failed check is a bug problem.
-    function phone() {
-      pt.run = 'phone'; pt.status = 'running'; pt.events = []; pt.problems = []; pt.t0 = Date.now(); window.hawkesPlaytest._running = pt._running = true;
-      const w = window.innerWidth, bad = (m) => { ev('fail', m); pt.problems.push({ severity: 'bug', message: m }); }, ok = (m) => ev('pass', m);
-      const R = (el) => el.getBoundingClientRect(), wait = (ms) => new Promise((r) => setTimeout(r, ms));
-      ev('start', 'phone at ' + w + 'px');
-      return (async () => {
-        document.getElementById('step-1').scrollIntoView({ block: 'center' }); await wait(200);
-        const pre = document.getElementById('snip-1'), cp = document.querySelector('[data-copy="snip-1"]');
-        const a1 = R(cp), p1 = R(pre);
-        ev('measure', 'step 1 Copy ' + Math.round(a1.width) + 'x' + Math.round(a1.height) + ', snippet scrollWidth ' + pre.scrollWidth + ' / clientWidth ' + pre.clientWidth);
-        if (a1.height < 44 || a1.width < 44) bad('Copy button is smaller than 44px'); else ok('Copy button is at least 44px');
-        if (a1.bottom > p1.top + 1) bad('Copy button overlaps the snippet'); else ok('Copy button sits above the code');
-        if (pre.scrollWidth > pre.clientWidth + 1) bad('Step 1 snippet scrolls sideways (cut off)'); else ok('Step 1 snippet is fully visible');
-        document.getElementById('privacy').scrollIntoView({ block: 'start' }); await wait(200);
-        const de = document.documentElement, panel = document.getElementById('privacy');
-        ev('measure', 'What we send: panel scrollWidth ' + panel.scrollWidth + ' / clientWidth ' + panel.clientWidth + ', page ' + de.scrollWidth + ' / ' + de.clientWidth);
-        const last = document.getElementById('send-last');
-        if (panel.scrollWidth > panel.clientWidth + 1 || de.scrollWidth > de.clientWidth + 1 || last.scrollWidth > last.clientWidth + 1) bad('What we send scrolls sideways'); else ok('What we send fits with no sideways scroll');
-        const tg = document.getElementById('optout-toggle'), lab = tg.closest('label');
-        lab.scrollIntoView({ block: 'center' }); await wait(200);
-        const l = R(lab);
-        ev('measure', 'opt-out switch ' + Math.round(l.width) + 'x' + Math.round(l.height));
-        if (l.height < 44) bad('Opt-out switch is shorter than 44px'); else ok('Opt-out switch is at least 44px tall');
-        ev('press', 'opt-out switch'); lab.click(); await wait(100);
-        const line = document.getElementById('optout-line'), st = document.getElementById('optout-state').textContent;
-        ev('state', line.hidden ? 'no off line' : line.textContent + ' | ' + st);
-        if (line.hidden || !tg.checked) bad('Tapping the switch did not show that sending is off'); else ok('Sending is off is shown');
-        ev('press', 'opt-out switch back on'); lab.click(); await wait(100);
-        if (!line.hidden) bad('Line stays after switching back');
-      })().catch((e) => bad('Scenario error: ' + e.message)).then(() => {
-        pt.status = pt.problems.length ? 'lost' : 'won'; ev('finish', pt.status); window.hawkesPlaytest._running = pt._running = false;
-      });
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const bad = (m) => { ev('fail', m); pt.problems.push({ severity: 'bug', message: m }); };
+    const ok = (m) => ev('pass', m);
+    const scene = (name, progress) => { pt.scene = name; pt.progress = progress; ev('scene', name); };
+    const R = (el) => el.getBoundingClientRect();
+    const carrying = (n) => window.hawkesRequests.filter((r) => r.events.indexOf(n) >= 0);
+
+    async function waitForSdk(limitMs) {
+      const steps = Math.ceil((limitMs || 10000) / 100);
+      for (let i = 0; i < steps && !(window.hawkesAnalytics && window.hawkesAnalytics.version); i++) await wait(100);
+      return !!(window.hawkesAnalytics && window.hawkesAnalytics.version);
     }
-    // "mobile": phone-size checks of the async tag and load, five quick taps (one request), then hiding the page.
-    function mobile() {
-      pt.run = 'mobile'; pt.status = 'running'; pt.events = []; pt.problems = []; pt.t0 = Date.now(); window.hawkesPlaytest._running = pt._running = true;
-      const bad = (m) => { ev('fail', m); pt.problems.push({ severity: 'bug', message: m }); }, ok = (m) => ev('pass', m);
-      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-      const carrying = (n) => window.hawkesRequests.filter((r) => r.events.indexOf(n) >= 0);
-      ev('start', 'mobile at ' + window.innerWidth + 'px');
-      return (async () => {
-        const tag = document.querySelector('script[src*="analytics@1.js"]');
-        ev('measure', 'SDK tag: ' + (tag ? tag.outerHTML : 'missing'));
-        if (tag && tag.async && !tag.defer && tag.hasAttribute('async')) ok('SDK script tag is async'); else bad('SDK script tag is not async');
-        const nav = performance.getEntriesByType('navigation')[0], interactive = nav ? Math.round(nav.domInteractive) : -1;
-        ev('measure', 'interactive (domInteractive) at ' + interactive + ' ms; SDK ' + (window.hawkesAnalytics && window.hawkesAnalytics.version ? 'running' : 'not yet arrived'));
-        if (interactive < 0 || interactive > 3000) bad('Page not interactive within 3 seconds'); else ok('Page interactive within 3 seconds');
-        for (let i = 0; i < 100 && !(window.hawkesAnalytics && window.hawkesAnalytics.version); i++) await wait(100);
-        if (!(window.hawkesAnalytics && window.hawkesAnalytics.version)) { bad('The SDK never arrived'); return; }
-        window.hawkesAnalytics.flush(); await wait(200); // what the page itself queued goes first, apart from the taps
-        const btn = document.getElementById('quick-click'), base = window.hawkesRequests.length;
-        btn.scrollIntoView({ block: 'center' }); await wait(200);
-        for (let i = 1; i <= 5; i++) { ev('press', 'Quick click ' + i); btn.click(); await wait(150); }
-        ev('state', 'taps done, requests since: ' + (window.hawkesRequests.length - base));
-        if (window.hawkesRequests.length !== base) bad('A request went out while the taps were still coming'); else ok('Nothing sent while the taps kept coming');
-        await wait(3500);
-        const got = carrying('demo_quick');
-        ev('measure', 'requests carrying the taps: ' + got.length + (got[0] ? ' with ' + got[0].events.filter((x) => x === 'demo_quick').length + ' taps' : ''));
-        if (got.length === 1 && got[0].events.filter((x) => x === 'demo_quick').length === 5) ok('Five quick clicks sent one batched request'); else bad('Five quick clicks did not send exactly one batched request (' + got.length + ' requests)');
-        window.hawkesAnalytics.track('demo_hide'); const b2 = window.hawkesRequests.length;
-        ev('press', 'hide the page (visibilitychange to hidden, as a phone does when you switch app)');
-        try { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); } catch (e) { bad('Could not hide the page: ' + e.message); }
-        const sent = window.hawkesRequests.slice(b2).filter((r) => r.events.indexOf('demo_hide') >= 0);
-        ev('state', 'sent at once on hide: ' + sent.length + ' request(s)' + (sent[0] ? ' (' + sent[0].events.join(', ') + ')' : ''));
-        if (sent.length === 1) ok('Hiding the page sent the queued events at once'); else bad('Hiding the page did not send the queued event');
-        delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange'));
-      })().catch((e) => bad('Scenario error: ' + e.message)).then(() => {
-        pt.status = pt.problems.length ? 'lost' : 'won'; ev('finish', pt.status); window.hawkesPlaytest._running = pt._running = false;
-      });
+
+    // Shared path every scenario plays: three steps, Send→ack, What we send, opt-out (nothing sent), bad name warning.
+    async function exercisePage() {
+      scene('Step 1: Add the script', 0.1);
+      document.getElementById('step-1').scrollIntoView({ block: 'center' }); await wait(400);
+
+      scene('Step 2: Send an event', 0.25);
+      document.getElementById('step-2').scrollIntoView({ block: 'center' }); await wait(300);
+      if (!(await waitForSdk(10000))) { bad('The SDK never arrived'); return false; }
+
+      const btn = document.getElementById('send-event');
+      btn.scrollIntoView({ block: 'center' }); await wait(200);
+      const ack = new Promise((res) => ackWaiters.push(res));
+      ev('press', 'Send an event to Hawkes Gen');
+      btn.click();
+      const r = await ack;
+      if (r.ok) { ev('acknowledged', r.text); ok('Hawkes Gen acknowledged the event'); }
+      else { ev('not-acknowledged', r.text); bad(r.text); return false; }
+
+      scene('Step 3: Watch it appear', 0.45);
+      document.getElementById('step-3').scrollIntoView({ block: 'center' }); await wait(500);
+      const ackRow = document.querySelector('#events .ack.ok');
+      ev('state', ackRow ? ackRow.textContent : 'no acknowledged row');
+      if (ackRow && /Acknowledged by Hawkes Gen/.test(ackRow.textContent)) ok('Acknowledged row visible in the live list');
+      else bad('Acknowledged row not visible in step 3');
+
+      scene('What we send', 0.55);
+      document.getElementById('privacy').scrollIntoView({ block: 'start' }); await wait(400);
+
+      scene('Opt out', 0.7);
+      const tg = document.getElementById('optout-toggle'), lab = tg.closest('label');
+      lab.scrollIntoView({ block: 'center' }); await wait(300);
+      if (window.hawkesAnalytics) window.hawkesAnalytics.flush(); await wait(200);
+      const before = window.hawkesRequests.length;
+      const logBefore = (window.hawkesAnalytics.debugLog || []).length;
+      ev('press', 'opt-out switch'); lab.click(); await wait(150);
+      const line = document.getElementById('optout-line');
+      ev('state', line.hidden ? 'no off line' : line.textContent);
+      if (line.hidden || !tg.checked) bad('Tapping the switch did not show that sending is off');
+      else ok('Sending is off is shown');
+
+      const trackBtn = document.querySelector('[data-call="track"]');
+      trackBtn.scrollIntoView({ block: 'center' }); await wait(200);
+      ev('press', 'track while opted out'); trackBtn.click();
+      if (window.hawkesAnalytics) window.hawkesAnalytics.flush(); await wait(500);
+      const after = window.hawkesRequests.length;
+      const logAfter = (window.hawkesAnalytics.debugLog || []).length;
+      ev('state', 'requests ' + before + '→' + after + ', debugLog ' + logBefore + '→' + logAfter);
+      if (after !== before) bad('A request went out while opted out');
+      else ok('Nothing sent while opted out');
+      if (logAfter !== logBefore) bad('An event was recorded while opted out');
+      else ok('Nothing recorded while opted out');
+
+      scene('Bad event name', 0.85);
+      const badBtn = document.getElementById('bad-name');
+      badBtn.scrollIntoView({ block: 'center' }); await wait(200);
+      ev('press', 'Send a bad event name');
+      badBtn.click(); await wait(200);
+      const warn = document.getElementById('warn-result');
+      ev('state', warn.hidden ? 'no warning' : warn.textContent.slice(0, 120));
+      if (warn.hidden || !/skipped/.test(warn.textContent)) bad('Bad event name did not show the warning');
+      else ok('Bad event name warning is shown');
+
+      // Leave the page sending again so a later scenario (or a person) is not stuck opted out.
+      if (tg.checked) { ev('press', 'opt-out switch back on'); lab.click(); await wait(100); }
+      return pt.problems.length === 0;
     }
+
+    async function layoutChecks() {
+      scene('Layout: step 1 snippet', 0.92);
+      document.getElementById('step-1').scrollIntoView({ block: 'center' }); await wait(200);
+      const pre = document.getElementById('snip-1'), cp = document.querySelector('[data-copy="snip-1"]');
+      const a1 = R(cp), p1 = R(pre);
+      ev('measure', 'step 1 Copy ' + Math.round(a1.width) + 'x' + Math.round(a1.height) + ', snippet scrollWidth ' + pre.scrollWidth + ' / clientWidth ' + pre.clientWidth);
+      if (a1.height < 44 || a1.width < 44) bad('Copy button is smaller than 44px'); else ok('Copy button is at least 44px');
+      if (a1.bottom > p1.top + 1) bad('Copy button overlaps the snippet'); else ok('Copy button sits above the code');
+      if (pre.scrollWidth > pre.clientWidth + 1) bad('Step 1 snippet scrolls sideways (cut off)'); else ok('Step 1 snippet is fully visible');
+
+      scene('Layout: What we send', 0.95);
+      document.getElementById('privacy').scrollIntoView({ block: 'start' }); await wait(200);
+      const de = document.documentElement, panel = document.getElementById('privacy'), last = document.getElementById('send-last');
+      ev('measure', 'What we send: panel scrollWidth ' + panel.scrollWidth + ' / clientWidth ' + panel.clientWidth + ', page ' + de.scrollWidth + ' / ' + de.clientWidth);
+      if (panel.scrollWidth > panel.clientWidth + 1 || de.scrollWidth > de.clientWidth + 1 || last.scrollWidth > last.clientWidth + 1) bad('What we send scrolls sideways');
+      else ok('What we send fits with no sideways scroll');
+
+      const tg = document.getElementById('optout-toggle'), lab = tg.closest('label');
+      lab.scrollIntoView({ block: 'center' }); await wait(200);
+      const l = R(lab);
+      ev('measure', 'opt-out switch ' + Math.round(l.width) + 'x' + Math.round(l.height));
+      if (l.height < 44) bad('Opt-out switch is shorter than 44px'); else ok('Opt-out switch is at least 44px tall');
+    }
+
+    async function batchingChecks() {
+      scene('Batching: five taps', 0.92);
+      const tag = document.querySelector('script[src*="analytics@1.js"]');
+      ev('measure', 'SDK tag: ' + (tag ? tag.outerHTML : 'missing'));
+      if (tag && tag.async && !tag.defer && tag.hasAttribute('async')) ok('SDK script tag is async'); else bad('SDK script tag is not async');
+      const nav = performance.getEntriesByType('navigation')[0], interactive = nav ? Math.round(nav.domInteractive) : -1;
+      ev('measure', 'interactive (domInteractive) at ' + interactive + ' ms');
+      if (interactive < 0 || interactive > 3000) bad('Page not interactive within 3 seconds'); else ok('Page interactive within 3 seconds');
+      if (!(await waitForSdk(10000))) { bad('The SDK never arrived'); return; }
+      window.hawkesAnalytics.flush(); await wait(200);
+      const btn = document.getElementById('quick-click'), base = window.hawkesRequests.length;
+      btn.scrollIntoView({ block: 'center' }); await wait(200);
+      for (let i = 1; i <= 5; i++) { ev('press', 'Quick click ' + i); btn.click(); await wait(150); }
+      ev('state', 'taps done, requests since: ' + (window.hawkesRequests.length - base));
+      if (window.hawkesRequests.length !== base) bad('A request went out while the taps were still coming'); else ok('Nothing sent while the taps kept coming');
+      await wait(3500);
+      const got = carrying('demo_quick');
+      ev('measure', 'requests carrying the taps: ' + got.length + (got[0] ? ' with ' + got[0].events.filter((x) => x === 'demo_quick').length + ' taps' : ''));
+      if (got.length === 1 && got[0].events.filter((x) => x === 'demo_quick').length === 5) ok('Five quick clicks sent one batched request');
+      else bad('Five quick clicks did not send exactly one batched request (' + got.length + ' requests)');
+
+      scene('Batching: hide sends', 0.97);
+      window.hawkesAnalytics.track('demo_hide'); const b2 = window.hawkesRequests.length;
+      ev('press', 'hide the page (visibilitychange to hidden, as a phone does when you switch app)');
+      try { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); }
+      catch (e) { bad('Could not hide the page: ' + e.message); }
+      const sent = window.hawkesRequests.slice(b2).filter((r) => r.events.indexOf('demo_hide') >= 0);
+      ev('state', 'sent at once on hide: ' + sent.length + ' request(s)' + (sent[0] ? ' (' + sent[0].events.join(', ') + ')' : ''));
+      if (sent.length === 1) ok('Hiding the page sent the queued events at once'); else bad('Hiding the page did not send the queued event');
+      try { delete document.visibilityState; } catch (e) { /* ignore */ }
+      document.dispatchEvent(new Event('visibilitychange'));
+    }
+
+    function begin(id) {
+      pt.run = id; pt.status = 'running'; pt.scene = 'Demo page'; pt.progress = 0;
+      pt.events = []; pt.problems = []; pt.t0 = Date.now();
+      window.hawkesPlaytest._running = pt._running = true;
+      ev('start', id + ' at ' + window.innerWidth + 'px');
+    }
+    function end() {
+      pt.progress = 1;
+      pt.status = pt.problems.length ? 'lost' : 'won';
+      ev('finish', pt.status);
+      window.hawkesPlaytest._running = pt._running = false;
+    }
+
+    function runScenario(id, extras) {
+      begin(id);
+      return (async () => {
+        await exercisePage();
+        if (extras) await extras();
+      })().catch((e) => bad('Scenario error: ' + (e && e.message || e))).then(end);
+    }
+
     window.hawkesPlaytest = {
       version: 2, product: 'hawkes-analytics', _running: false,
-      scenarios: () => [{ id: 'mobile', title: 'Mobile: async tag, five taps one request, hide sends', seconds: 12, tags: ['mobile', 'batching'],
-        description: 'At phone size: checks the SDK tag is async and the page interactive within 3 seconds, taps Quick click five times and expects one batched request, then hides the page and expects the queued event to be sent at once.' },
-      { id: 'phone', title: 'Phone layout: snippet, opt-out switch, What we send', seconds: 15, tags: ['layout'],
-        description: 'Scrolls to the step 1 snippet, the What we send panel and the opt-out switch; taps the switch; checks no Copy button covers code, no sideways scroll, the switch is at least 44px tall and "Sending is off" shows. Best played at 390px wide.' },
-      { id: 'smoke', title: 'Press Send and see Hawkes Gen acknowledge the event', seconds: 12, tags: ['smoke'],
-        description: 'Loads the page, presses "Send an event to Hawkes Gen" and waits for the acknowledged line in the live list. Fails with "No event reached Hawkes Gen within 10 seconds".' }],
+      scenarios: () => [
+        { id: 'smoke', title: 'Send, acknowledge, opt-out, bad name', seconds: 45, tags: ['smoke'],
+          description: 'Presses Send and waits for the acknowledged row (fails with "No event reached Hawkes Gen within 10 seconds"), scrolls steps 1–3 and What we send, toggles opt-out and checks nothing is sent, then sends a bad event name to show the warning. Each step is a scene for screenshots.' },
+        { id: 'phone', title: 'Phone: exercise page plus layout', seconds: 55, tags: ['layout', 'phone'],
+          description: 'Same exercise as smoke at phone size (390×844, touch), plus layout checks: Copy ≥44px and above the snippet, no sideways scroll on What we send, opt-out switch ≥44px.' },
+        { id: 'mobile', title: 'Mobile: exercise page plus batching', seconds: 60, tags: ['mobile', 'batching'],
+          description: 'Same exercise as smoke at phone size, plus async tag / interactive-in-3s, five Quick clicks → one batched request, and hide-sends-queued.' },
+      ],
       start(id) {
-        if (id === 'phone') return phone();
-        if (id === 'mobile') return mobile();
-        if (id !== 'smoke') { pt.status = 'error'; pt.problems = [{ severity: 'bug', message: 'Unknown scenario ' + id }]; pt.run = id; return; }
-        pt.run = id; pt.status = 'running'; pt.events = []; pt.problems = []; pt.t0 = Date.now(); window.hawkesPlaytest._running = pt._running = true;
-        ev('start', id);
-        const btn = document.getElementById('send-event');
-        btn.scrollIntoView({ block: 'center' });
-        const wait = new Promise((res) => ackWaiters.push(res));
-        ev('press', 'Send an event to Hawkes Gen');
-        btn.click();
-        return wait.then((r) => {
-          if (r.ok) { ev('acknowledged', r.text); pt.status = 'won'; }
-          else { ev('not-acknowledged', r.text); pt.problems.push({ severity: 'bug', message: r.text }); pt.status = 'lost'; }
-        }).finally(() => { ev('finish', pt.status); window.hawkesPlaytest._running = pt._running = false; });
+        if (id === 'phone') return runScenario('phone', layoutChecks);
+        if (id === 'mobile') return runScenario('mobile', batchingChecks);
+        if (id === 'smoke') return runScenario('smoke', null);
+        pt.status = 'error'; pt.problems = [{ severity: 'bug', message: 'Unknown scenario ' + id }]; pt.run = id; return;
       },
       stop() { pt.status = pt.status === 'running' ? 'done' : pt.status; window.hawkesPlaytest._running = pt._running = false; },
-      state: () => ({ ready: document.readyState === 'complete', status: pt.status, scene: 'Demo page', progress: pt.status === 'running' ? 0.5 : pt.status === 'idle' ? 0 : 1,
+      state: () => ({ ready: document.readyState === 'complete', status: pt.status, scene: pt.scene, progress: pt.progress,
         note: (document.getElementById('send-result') || {}).textContent || '' }),
       report: () => ({ scenario: pt.run || 'smoke', outcome: pt.status === 'won' ? 'won' : pt.status === 'running' ? 'stuck' : pt.status === 'idle' ? 'done' : pt.status === 'lost' ? 'lost' : 'error',
-        seconds: pt.t0 ? (Date.now() - pt.t0) / 1000 : 0, metrics: { sent: sendN, acknowledged: Object.values(acks).filter((x) => x.ok).length },
+        seconds: pt.t0 ? (Date.now() - pt.t0) / 1000 : 0, metrics: { sent: sendN, acknowledged: Object.values(acks).filter((x) => x.ok).length, problems: pt.problems.length },
         events: pt.events, problems: pt.problems, log: pt.events.map((e) => e.type + (e.detail ? ': ' + e.detail : '')) }),
     };
     { const q = new URLSearchParams(location.search).get('playtest'); if (q) window.addEventListener('load', () => window.hawkesPlaytest.start(q)); }
 
     window.hawkesPlaytest.sendToGen = sendToGen;
+    window.hawkesPlaytest.sendBadName = sendBadName;
   })();
   </script>
   <!-- The one line a page needs. async: it never holds the page up. This demo reports to the hawkes-analytics product; its events are flagged. -->
@@ -223,6 +331,7 @@
     .toggle:has(input:checked) { border-color: var(--accent); }
     @media (prefers-reduced-motion: reduce) { .toggle input, .toggle input::after { transition: none; } }
     #optout-line { font-weight: 600; color: var(--accent); }
+    #warn-result { font-weight: 600; color: var(--accent); margin: 0 0 12px; white-space: pre-wrap; }
     .state { font-weight: 600; }
     #sample-list { list-style: none; margin: 0; padding: 0; font-family: ui-monospace, monospace; font-size: 14px; }
     #sample-list li { border-top: 1px solid var(--line); padding: 4px 0; }
@@ -267,7 +376,9 @@ hawkesAnalytics.track('demo_click');</pre>
       <button data-call="levelEnd">levelEnd(1, 'complete')</button>
       <button data-call="track">track('demo_click')</button>
       <button data-call="ask">ask()</button>
+      <button id="bad-name">Send a bad event name</button>
     </div>
+    <p id="warn-result" role="status" hidden>No warning yet.</p>
   </section>
 
   <section id="step-3" aria-labelledby="h3s">
@@ -432,8 +543,9 @@ hawkesAnalytics.track('demo_click');</pre>
   window.addEventListener('online', privacy); window.addEventListener('offline', privacy);
   // Updates happen on user action and once when the SDK arrives: no timers, no polling.
   document.querySelectorAll('[data-call]').forEach((b) => b.addEventListener('click', () => { calls[b.dataset.call](); show(true); privacy(); }));
-  // Send / playtest live in <head> (window.hawkesPlaytest). Wire the button once the DOM has it.
+  // Send / playtest live in <head> (window.hawkesPlaytest). Wire the buttons once the DOM has them.
   document.getElementById('send-event').addEventListener('click', () => window.hawkesPlaytest.sendToGen());
+  document.getElementById('bad-name').addEventListener('click', () => window.hawkesPlaytest.sendBadName());
   window.__hawkesDemoUi = () => { show(true); privacy(); };
 
   // The Unity sample, on the page: the same three calls, and a list of every call, newest first (see Samples~/BasicEvents).
