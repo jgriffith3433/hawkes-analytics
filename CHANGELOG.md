@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.1 (2026-11-10)
+
+- Docs on the beta site: `npm run docs` (`tools/docs.mjs`) renders `docs/*.md` (quickstart, events, privacy, API) into
+  static HTML under `dist/docs/` with the demo's look — left sidebar (Menu at phone width), on-page TOC, heading
+  anchors, build-time syntax highlight and Copy on every code block. No runtime markdown fetch. The demo header links
+  to Docs; a `docs` playtest scenario opens three pages and checks sidebar, Copy and no sideways scroll at 390px.
+  Package build: `npm test && npm run pack && npm run docs && cp example/index.html dist/index.html`.
+
 ## 1.4.0 (2026-11-10)
 
 - Listener API: `hawkesAnalytics.on(type, fn)` / `off(type, fn)` for `queued`, `batched`, `sent`, `acked` and `dropped`.
