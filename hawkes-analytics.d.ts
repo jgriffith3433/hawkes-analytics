@@ -97,6 +97,9 @@ export interface HawkesAnalytics {
   /** Mark this browser as J's own (also ?hawkes-internal=1; ?hawkes-internal=0 clears it). */
   internal(on?: boolean): void;
   flush(): void;
+  /** Watch events on their way: queued, batched, sent, acked (Hawkes Gen answered) or dropped (with a plain `reason`). */
+  on(type: 'queued' | 'batched' | 'sent' | 'acked' | 'dropped', fn: (info: { id: string | null; name: string; fields: Props; batch: string | null; queuedAt: number | null; batchedAt?: number; sentAt?: number; ackedAt?: number; droppedAt?: number; reason?: string }) => void): void;
+  off(type: 'queued' | 'batched' | 'sent' | 'acked' | 'dropped', fn: (info: any) => void): void;
   /** Input the SDK can't see (a game in a sandboxed frame forwards its own): keeps active time and the session going. */
   activity(): void;
   /** Ties the sessions from now on to the site's own account id (4-64 of A-Z a-z 0-9 _ -; no email or name). null on sign-out. */
