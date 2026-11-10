@@ -38,8 +38,8 @@
       const n = ++sendN, out = document.getElementById('send-result');
       const h = window.hawkesAnalytics;
       demoCall('track', 'demo_send', { n });
-      out.textContent = 'Sent. Waiting for Hawkes Gen…';
-      const finish = (ok, text) => { acks[n] = { ok, text }; out.textContent = text; if (typeof window.__hawkesDemoUi === 'function') window.__hawkesDemoUi(); sendDone({ ok, text, n }); };
+      if (out) out.textContent = 'Sent. Waiting for Hawkes Gen…';
+      const finish = (ok, text) => { acks[n] = { ok, text }; if (out) out.textContent = text; if (typeof window.__hawkesDemoUi === 'function') window.__hawkesDemoUi(); sendDone({ ok, text, n }); };
       const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), GEN_WAIT);
       const cfg = h && h.config ? h.config() : {};
       const body = JSON.stringify({ product: GEN_PRODUCT, anon: 'a_' + rnd(), session: 's_' + rnd(),
@@ -157,7 +157,7 @@
       },
       stop() { pt.status = pt.status === 'running' ? 'done' : pt.status; window.hawkesPlaytest._running = pt._running = false; },
       state: () => ({ ready: document.readyState === 'complete', status: pt.status, scene: 'Demo page', progress: pt.status === 'running' ? 0.5 : pt.status === 'idle' ? 0 : 1,
-        note: document.getElementById('send-result').textContent }),
+        note: (document.getElementById('send-result') || {}).textContent || '' }),
       report: () => ({ scenario: pt.run || 'smoke', outcome: pt.status === 'won' ? 'won' : pt.status === 'running' ? 'stuck' : pt.status === 'idle' ? 'done' : pt.status === 'lost' ? 'lost' : 'error',
         seconds: pt.t0 ? (Date.now() - pt.t0) / 1000 : 0, metrics: { sent: sendN, acknowledged: Object.values(acks).filter((x) => x.ok).length },
         events: pt.events, problems: pt.problems, log: pt.events.map((e) => e.type + (e.detail ? ': ' + e.detail : '')) }),
