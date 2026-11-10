@@ -122,10 +122,28 @@
 
       scene('Step 3: Watch it appear', 0.45);
       document.getElementById('step-3').scrollIntoView({ block: 'center' }); await wait(500);
-      const ackRow = document.querySelector('#events .ack.ok');
-      ev('state', ackRow ? ackRow.textContent : 'no acknowledged row');
-      if (ackRow && /Acknowledged by Hawkes Gen/.test(ackRow.textContent)) ok('Acknowledged row visible in the live list');
-      else bad('Acknowledged row not visible in step 3');
+      let row = null;
+      for (let i = 0; i < 120; i++) {
+        row = document.querySelector('#events li[data-name="demo_send"][data-state="acked"]');
+        if (row) break;
+        await wait(100);
+      }
+      const first = document.querySelector('#events li[data-name="demo_send"]');
+      ev('state', first ? 'demo_send row: ' + first.dataset.state + ', ' + first.querySelector('.ms').textContent : 'no demo_send row');
+      if (row) ok('The demo_send row went queued, sent, acknowledged by itself'); else bad('The demo_send row never reached acknowledged');
+      if (row) {
+        row.scrollIntoView({ block: 'center' }); await wait(200);
+        ev('press', 'tap the demo_send row');
+        row.querySelector('button').click(); await wait(300);
+        const pre = row.querySelector('pre');
+        ev('state', 'expanded: ' + (pre.hidden ? 'hidden' : pre.textContent.replace(/\s+/g, ' ').slice(0, 160)));
+        if (!pre.hidden && /"name": "demo_send"/.test(pre.textContent) && /acknowledged in \d+ ms/.test(pre.textContent)) ok('Tapping the row shows the exact fields sent and the time it took');
+        else bad('Tapping the row did not show the fields and time');
+        const box = document.getElementById('events'), sec = document.getElementById('step-3');
+        ev('measure', 'inspector ' + Math.round(R(box).width) + 'px wide in a card ' + Math.round(R(sec).width) + 'px, page ' + document.documentElement.scrollWidth + '/' + document.documentElement.clientWidth);
+        if (R(box).right > R(sec).right + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) bad('The inspector does not fit the screen');
+        else ok('The inspector fits the screen' + (box.scrollHeight > box.clientHeight ? ' and long rows scroll inside the card' : ''));
+      }
 
       scene('What we send', 0.55);
       document.getElementById('privacy').scrollIntoView({ block: 'start' }); await wait(400);
@@ -298,18 +316,28 @@
     .snip pre { border: 0; }
     @media (max-width: 600px) { pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; } }
     #status { font-weight: 600; }
-    #events { list-style: none; margin: 0; padding: 0; max-height: 46vh; overflow: auto; }
-    #events li { border-top: 1px solid var(--line); padding: 8px 0; }
+    #events { list-style: none; margin: 0; padding: 0; max-height: 46vh; overflow: auto; overscroll-behavior: contain; }
+    #events li { border-top: 1px solid var(--line); border-left: 3px solid transparent; padding: 0 0 0 6px; min-width: 0; }
     #events li:first-child { border-top: 0; }
-    #events b { font-family: ui-monospace, monospace; }
-    #events small { display: block; color: var(--muted); }
-    #events .new { animation: fresh 1.2s ease-out; }
-    @keyframes fresh { from { background: color-mix(in srgb, var(--ok) 30%, transparent); } to { background: transparent; } }
-    @media (prefers-reduced-motion: reduce) { #events .new { animation: none; } }
-    #empty { color: var(--muted); }
-    #events .ack { font-weight: 600; }
-    #events .ack.ok { color: var(--ok); }
-    #events .ack.bad { color: var(--accent); }
+    #events li[data-batch] { border-left-color: var(--accent); }
+    #events li.up { border-top-color: transparent; }
+    #events li[data-batch]:not(.up) { border-top-left-radius: 8px; }
+    #events li[data-batch]:not(.down) { border-bottom-left-radius: 8px; }
+    #events .ev { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 6px 8px 6px 0; border: 0; background: none; text-align: left; flex-wrap: wrap; }
+    #events .nm { font-family: ui-monospace, monospace; font-weight: 700; overflow-wrap: anywhere; flex: 1 1 8em; min-width: 0; }
+    #events .pill { flex: none; font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); transition: background .35s, color .35s, border-color .35s; }
+    #events li[data-state="sent"] .pill { color: var(--fg); border-color: var(--fg); }
+    #events li[data-state="acked"] .pill { background: var(--ok); border-color: var(--ok); color: var(--bg); }
+    #events li[data-state="dropped"] .pill { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+    #events li.pop .pill { animation: pop .4s ease-out; }
+    @keyframes pop { 0% { transform: scale(.8); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
+    #events .ms { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 4.5em; text-align: right; }
+    #events .ex { padding: 0 8px 10px 0; }
+    #events .ex pre { padding: 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 8px; }
+    #events .ex small { display: block; color: var(--muted); margin: 6px 0 0; overflow-wrap: anywhere; }
+    #events .ex[hidden] { display: none; }
+    @media (prefers-reduced-motion: reduce) { #events li.pop .pill { animation: none; } #events .pill { transition: none; } }
+    #empty { color: var(--muted); padding: 8px 0; }
     button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
     #send-result { font-weight: 600; margin: 0 0 12px; }
     .panel table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -385,8 +413,8 @@ hawkesAnalytics.track('demo_click');</pre>
 
   <section id="step-3" aria-labelledby="h3s">
     <h2 id="h3s"><span class="n">3</span> Watch it appear</h2>
-    <p>Each event shows up here the moment you send it, with what it tells you. No reload.
-       <span id="count">0 events</span></p>
+    <p>Each event is a row that moves from queued to sent to acknowledged by itself, with the batch it travelled in and
+       how long Hawkes Gen took to answer. Tap a row to see the exact fields. <span id="count">0 events</span></p>
     <ul id="events" aria-live="polite"><li id="empty">No events yet. Do step 2.</li></ul>
   </section>
   <section id="privacy" class="panel" aria-labelledby="hps">
@@ -490,26 +518,65 @@ hawkesAnalytics.track('demo_click');</pre>
   const list = document.getElementById('events');
   const acks = (window.__hawkesDemoAcks = window.__hawkesDemoAcks || {});
   let shown = 0;
-  function show(fresh) {
+  function show() {
     const h = window.hawkesAnalytics;
     document.getElementById('status').textContent = h && h.version ? 'v' + h.version + (h.config().product ? '' : ' (no product: nothing sent)') : 'not loaded (blocked or offline)';
-    const log = h && h.debugLog ? h.debugLog.slice(-30) : [];
-    if (!log.length) return;
-    list.textContent = '';
-    log.slice().reverse().forEach((e, i) => {
-      const li = document.createElement('li');
-      if (fresh && i < log.length - shown) li.className = 'new';
-      const b = document.createElement('b'); b.textContent = e.name;
-      const p = document.createElement('span'); p.textContent = ' ' + JSON.stringify(e.props || {});
-      const s = document.createElement('small'); s.textContent = explain[e.name] || 'An event from your game or the SDK. Its name and details reach your Analytics tab as they are.';
-      li.append(b, p, s);
-      const r = e.name === 'demo_send' && e.props ? acks[e.props.n] : null;
-      if (r) { const k = document.createElement('small'); k.className = 'ack ' + (r.ok ? 'ok' : 'bad'); k.setAttribute('data-ack', r.ok ? 'yes' : 'no'); k.textContent = r.text; li.append(k); }
-      list.append(li);
-    });
-    shown = log.length;
-    document.getElementById('count').textContent = shown + (shown === 1 ? ' event' : ' events');
   }
+  // The inspector: driven only by the SDK's listener callbacks (queued, batched, sent, acked, dropped). No timers.
+  const rows = {}; let anon = 0;
+  const PILL = { queued: 'queued', sent: 'sent', acked: 'acknowledged', dropped: 'dropped' };
+  function sentEvent(i) {
+    const seq = Number(String(i.id || '').split(':')[1]), log = (window.hawkesAnalytics && window.hawkesAnalytics.debugLog) || [];
+    const e = log.filter((x) => x.seq === seq && x.name === i.name)[0];
+    return e ? { name: e.name, seq: e.seq, t: e.t, active: e.active, page: e.page, screen: e.screen, ctx: e.ctx, props: e.props } : { name: i.name, props: i.fields };
+  }
+  function detail(r) {
+    const i = r.info, t = [];
+    if (i.batch) t.push('batch ' + i.batch);
+    if (i.sentAt && i.queuedAt) t.push('waited ' + (i.sentAt - i.queuedAt) + ' ms in the queue');
+    if (i.ackedAt && i.sentAt) t.push('acknowledged in ' + (i.ackedAt - i.sentAt) + ' ms');
+    if (i.reason) t.push('dropped: ' + i.reason);
+    r.pre.textContent = JSON.stringify(sentEvent(i), null, 2);
+    r.note.textContent = t.join(' · ');
+  }
+  function regroup() {
+    for (let li = list.firstElementChild; li; li = li.nextElementSibling) {
+      const b = li.dataset.batch, p = li.previousElementSibling, n = li.nextElementSibling;
+      li.classList.toggle('up', !!(b && p && p.dataset.batch === b));
+      li.classList.toggle('down', !!(b && n && n.dataset.batch === b));
+    }
+  }
+  function inspect(type, i) {
+    const key = i.id || 'x' + (++anon);
+    let r = rows[key];
+    if (!r) {
+      const emptyLi = document.getElementById('empty'); if (emptyLi) emptyLi.remove();
+      const li = document.createElement('li'), btn = document.createElement('button'), nm = document.createElement('span'), pill = document.createElement('span'), ms = document.createElement('span');
+      const ex = document.createElement('div'), pre = document.createElement('pre'), note = document.createElement('small');
+      btn.className = 'ev'; btn.setAttribute('aria-expanded', 'false'); nm.className = 'nm'; pill.className = 'pill'; ms.className = 'ms'; ex.className = 'ex'; ex.hidden = true;
+      nm.textContent = i.name; btn.append(nm, pill, ms); ex.append(pre, note); li.append(btn, ex); li.dataset.name = i.name;
+      r = rows[key] = { li, pill, ms, pre, note, ex, info: i };
+      btn.addEventListener('click', () => { ex.hidden = !ex.hidden; btn.setAttribute('aria-expanded', String(!ex.hidden)); if (!ex.hidden) detail(r); });
+      list.prepend(li);
+      while (list.children.length > 60) { list.lastElementChild.remove(); }
+      shown++;
+      document.getElementById('count').textContent = shown + (shown === 1 ? ' event' : ' events');
+    }
+    r.info = i;
+    const state = type === 'batched' ? 'queued' : type;
+    if (r.li.dataset.state !== state) { r.li.dataset.state = state; r.li.classList.remove('pop'); void r.li.offsetWidth; r.li.classList.add('pop'); }
+    r.pill.textContent = PILL[state] + (state === 'dropped' && i.reason ? ': ' + i.reason : '');
+    if (i.batch) r.li.dataset.batch = i.batch;
+    if (state === 'acked' && i.sentAt) r.ms.textContent = (i.ackedAt - i.sentAt) + ' ms';
+    else if (state === 'dropped') r.ms.textContent = '–';
+    if (!r.ex.hidden) detail(r);
+    if (type === 'batched') regroup();
+  }
+  ['queued', 'batched', 'sent', 'acked', 'dropped'].forEach((t) => {
+    const f = (i) => { try { inspect(t, i); } catch (e) { /* the page never breaks the SDK */ } };
+    const h = window.hawkesAnalytics;
+    if (h && h.on) h.on(t, f); else window.hawkesAnalyticsQ.push(['on', t, f]);
+  });
   // What we send: one list, the same names docs/privacy.md and the tests use (tools/check.mjs keeps them together).
   const SENT = [
     ['product', 'Your game\'s id.'], ['build', 'Your game\'s version (and commit, date).'], ['env', 'local, beta, preview or live, from the host name.'],
