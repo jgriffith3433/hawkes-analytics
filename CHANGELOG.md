@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.10 (2026-11-10)
+
+- Demo playtests exercise the page: `smoke`, `phone` and `mobile` all press Send and wait for the acknowledged row
+  (fail with "No event reached Hawkes Gen within 10 seconds"), scroll steps 1–3 and What we send, toggle opt-out and
+  check nothing is sent or recorded, then send a bad event name (`Shop Purchase`) so the warning shows on the page.
+  Each step logs a `scene` for screenshots. `phone` keeps the layout checks; `mobile` keeps async-tag and batching.
+  Send respects opt-out. Needs `hawkes-analytics` in Gen's `analytics/products.json` with the beta origin, or Gen drops
+  the event (accepted: 0). No SDK or Unity code changed.
+
 ## 1.3.9 (2026-11-10)
 
 - Demo page: `window.hawkesPlaytest` is defined synchronously in `<head>`, before and independent of the SDK script, so

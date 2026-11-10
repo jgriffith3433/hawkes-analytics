@@ -1,6 +1,6 @@
 {
   "name": "@hawkesgen/analytics",
-  "version": "1.3.9",
+  "version": "1.3.10",
   "description": "Hawkes Analytics: player analytics for web and Unity WebGL games in one line. Sessions, retention, funnels, levels, deaths, errors, feedback and what gets in players' way, read in Hawkes Studio's Analytics tab. https://hawkesgen.ai",
   "type": "module",
   "main": "./index.mjs",
