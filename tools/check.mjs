@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
+import { spawnSync } from 'node:child_process';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UPM = path.join(ROOT, 'Packages', 'com.hawkes.analytics');
@@ -72,14 +73,14 @@ for (const f of ['product', 'build', 'env', 'anon', 'session', 'user', 'sdk', 'e
 // The playtest contract: the demo is published as the beta site and Studio plays it, so window.hawkesPlaytest must exist as
 // soon as the head scripts have run (no waiting for load or network) and list every scenario Studio plays. Only the
 // scripts without a src are evaluated, in a bare fake window with no network.
-const SCENARIOS = ['smoke', 'phone', 'mobile', 'docs'];
+const SCENARIOS = ['smoke', 'phone', 'inspector', 'mobile', 'docs'];
 {
   const head = demo.split(/<body[\s>]/i)[0];
   const noop = () => {};
   const stub = new Proxy(noop, { get: (_, k) => (k === Symbol.toPrimitive ? () => '' : stub), apply: () => stub, construct: () => stub });
   const win = { location: { search: '', href: 'http://localhost/', origin: 'http://localhost' }, navigator: { userAgent: 'check' },
     document: { readyState: 'loading', addEventListener: noop, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], createElement: () => stub, head: stub, body: stub, documentElement: stub },
-    addEventListener: noop, URLSearchParams, setTimeout: noop, clearTimeout: noop, setInterval: noop, fetch: () => new Promise(noop), console: { log: noop, warn: noop, error: noop }, Date, Math, JSON, Object, Array, crypto: { getRandomValues: (a) => a } };
+    addEventListener: noop, URLSearchParams, URL, setTimeout: noop, clearTimeout: noop, setInterval: noop, fetch: () => new Promise(noop), console: { log: noop, warn: noop, error: noop }, Date, Math, JSON, Object, Array, crypto: { getRandomValues: (a) => a } };
   win.window = win; win.self = win; win.globalThis = win;
   vm.createContext(win);
   for (const m of head.matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi)) {
@@ -92,6 +93,40 @@ const SCENARIOS = ['smoke', 'phone', 'mobile', 'docs'];
     let ids = [];
     try { ids = pt.scenarios().map((s) => s.id); } catch (e) { fail(`window.hawkesPlaytest.scenarios() threw: ${e && e.message || e}`); }
     for (const id of SCENARIOS) if (!ids.includes(id)) fail(`window.hawkesPlaytest is missing the scenario "${id}" (found: ${ids.join(', ') || 'none'})`);
+  }
+
+  // The scenarios wait on the SDK's listener events, never on a timer that checks again and again.
+  if (/setInterval/.test(head) || /await wait\(100\)/.test(head)) fail('the demo\'s playtest contract polls (setInterval or a repeated wait(100)): wait on listener events instead');
+
+  // The docs-link step: a broken internal link fails the step naming the link, and the real site has none.
+  if (pt && typeof pt._checkLinks === 'function') {
+    const page = (links) => ({ status: 200, text: links.map((h) => `<a href="${h}">x</a>`).join('\n') });
+    const site = {
+      'http://localhost/s/index.html': page(['docs/', 'docs/privacy.html', 'https://example.com/out', '#top', 'mailto:a@b.c']),
+      'http://localhost/s/docs/': page(['../index.html', 'events.html', 'gone.html#part']),
+      'http://localhost/s/docs/privacy.html': page(['./']),
+      'http://localhost/s/docs/events.html': page(['api.html']),
+    };
+    const get = async (u) => site[u] || { status: 404, text: '' };
+    const r = await pt._checkLinks(get, 'http://localhost/s/index.html');
+    if (r.broken.length !== 2 || !r.broken.some((b) => b.link === 'gone.html#part' && b.status === 404 && b.from === 'docs/') || !r.broken.some((b) => b.link === 'api.html' && b.from === 'docs/events.html')) {
+      fail(`the docs-link step did not name the broken links (got ${JSON.stringify(r.broken)})`);
+    }
+    // The real demo and the docs pages the package build renders from docs/*.md.
+    const built = spawnSync(process.execPath, [path.join(ROOT, 'tools', 'docs.mjs')], { encoding: 'utf8' });
+    if (built.status !== 0) fail(`tools/docs.mjs failed: ${built.stderr}`);
+    else {
+      const dist = path.join(ROOT, 'dist');
+      const real = async (u) => {
+        let p = decodeURIComponent(new URL(u).pathname.replace(/^\/s\//, ''));
+        if (p === '' || p.endsWith('/')) p += 'index.html';
+        const file = p === 'index.html' ? demoPath : path.join(dist, p);
+        return fs.existsSync(file) && fs.statSync(file).isFile() ? { status: 200, text: fs.readFileSync(file, 'utf8') } : { status: 404, text: '' };
+      };
+      const rr = await pt._checkLinks(real, 'http://localhost/s/index.html');
+      for (const b of rr.broken) fail(`docs link "${b.link}" returns ${b.status}, linked from ${b.from}`);
+      if (rr.checked < 6) fail(`the docs-link step only checked ${rr.checked} pages: it should reach the demo, docs/ and every docs page`);
+    }
   }
 }
 

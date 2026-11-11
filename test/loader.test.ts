@@ -138,5 +138,16 @@ test('check.mjs fails the build when the demo lacks the playtest contract or a s
     const noPhone = run(demo.replace("id: 'phone'", "id: 'phoney'"));
     assert.notEqual(noPhone.status, 0);
     assert.match(noPhone.stderr, /missing the scenario "phone"/);
+    const noInspector = run(demo.replace("id: 'inspector'", "id: 'inspectr'"));
+    assert.notEqual(noInspector.status, 0);
+    assert.match(noInspector.stderr, /missing the scenario "inspector"/);
+    // A broken internal docs link fails the build's docs-link check, naming the link and the page that holds it.
+    const broken = run(demo.replace('<a id="docs-link" href="docs/">Docs</a>', '<a id="docs-link" href="docs/">Docs</a><a href="docs/gone.html">Gone</a>'));
+    assert.notEqual(broken.status, 0);
+    assert.match(broken.stderr, /docs link "docs\/gone\.html" returns 404, linked from index\.html/);
+    // The scenarios wait on listener events: a polling timer in the contract fails the build.
+    const polls = run(demo.replace('const GEN_WAIT = 10000;', 'const GEN_WAIT = 10000; setInterval(() => {}, 100);'));
+    assert.notEqual(polls.status, 0);
+    assert.match(polls.stderr, /polls/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
