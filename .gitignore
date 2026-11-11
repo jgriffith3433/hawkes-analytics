@@ -3,3 +3,11 @@ dist/
 *.log
 DevTools/CompileCheck/bin/
 DevTools/CompileCheck/obj/
+tools/unity-check/Library/
+tools/unity-check/Temp/
+tools/unity-check/Logs/
+tools/unity-check/obj/
+tools/unity-check/UserSettings/
+tools/unity-check/*.csproj
+tools/unity-check/*.sln
+tools/unity-check/Packages/packages-lock.json

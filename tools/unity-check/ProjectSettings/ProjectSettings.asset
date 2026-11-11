@@ -1,0 +1,38 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!129 &1
+PlayerSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 26
+  productGUID: a1b2c3d4e5f64789a0b1c2d3e4f50607
+  companyName: Hawkes Gen
+  productName: Hawkes Analytics Compile Check
+  defaultScreenWidth: 960
+  defaultScreenHeight: 600
+  defaultScreenWidthWeb: 960
+  defaultScreenHeightWeb: 600
+  m_ActiveColorSpace: 0
+  m_MTRendering: 1
+  stripEngineCode: 1
+  bundleVersion: 1.0
+  androidSupportedAspectRatio: 1
+  applicationIdentifier:
+    Standalone: ai.hawkesgen.analytics.compilecheck
+  overrideDefaultApplicationIdentifier: 1
+  webGLMemorySize: 32
+  webGLExceptionSupport: 1
+  webGLDataCaching: 1
+  webGLCompressionFormat: 1
+  webGLLinkerTarget: 1
+  webGLInitialMemorySize: 32
+  webGLMaximumMemorySize: 2048
+  scriptingDefineSymbols: {}
+  additionalCompilerArguments: {}
+  apiCompatibilityLevel: 6
+  activeInputHandler: 0
+  metroPackageName: HawkesAnalyticsCompileCheck
+  metroApplicationDescription: Hawkes Analytics Compile Check
+  cloudProjectId: 
+  projectName: Hawkes Analytics Compile Check
+  organizationId: 
+  cloudEnabled: 0
