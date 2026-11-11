@@ -58,7 +58,7 @@ const guids = new Map();
 })(UPM);
 
 // Docs sources the package build renders to dist/docs/ (tools/docs.mjs).
-for (const f of ['quickstart.md', 'events.md', 'privacy.md', 'api.md']) {
+for (const f of ['quickstart.md', 'recipes.md', 'events.md', 'privacy.md', 'api.md']) {
   if (!fs.existsSync(path.join(ROOT, 'docs', f))) fail(`docs/${f} is missing (beta docs pages are built from it)`);
 }
 

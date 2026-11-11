@@ -11,6 +11,7 @@ const DOCS = path.join(ROOT, 'docs');
 
 const PAGES = [
   { id: 'quickstart', file: 'quickstart.md', title: 'Quickstart', nav: 'Quickstart' },
+  { id: 'recipes', file: 'recipes.md', title: 'Recipes', nav: 'Recipes' },
   { id: 'events', file: 'events.md', title: 'Events', nav: 'Events' },
   { id: 'privacy', file: 'privacy.md', title: 'Privacy', nav: 'Privacy' },
   { id: 'api', file: 'api.md', title: 'API', nav: 'API' },
@@ -292,7 +293,8 @@ pre code { background: none; border: 0; padding: 0; font-size: inherit; color: v
   .sidebar { display: none; position: fixed; inset: 57px 0 auto 0; max-height: none; z-index: 30; background: var(--card); border-bottom: 1px solid var(--line); border-right: 0; padding: 12px 16px 20px; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
   body.nav-open .sidebar { display: block; }
   .article { padding: 20px 16px 48px; }
-  pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+  .snip { max-width: 100%; }
+  pre { max-width: 100%; overscroll-behavior-x: contain; }
 }
 `;
 

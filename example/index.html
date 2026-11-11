@@ -384,7 +384,7 @@
         ev('measure', 'Docs href=' + (link && link.getAttribute('href')));
         check(link && /docs\/?$/.test(link.getAttribute('href') || ''), 'Docs is reachable from the demo header', 'the demo header has no Docs link to docs/');
       });
-      const pages = ['docs/index.html', 'docs/events.html', 'docs/api.html'];
+      const pages = ['docs/index.html', 'docs/recipes.html', 'docs/events.html', 'docs/api.html'];
       const host = document.createElement('div');
       host.id = 'docs-frame-host'; host.setAttribute('aria-hidden', 'true');
       host.style.cssText = 'position:fixed;inset:0;z-index:9999;background:var(--bg,#f6f5f2);display:flex;flex-direction:column;';
@@ -416,6 +416,12 @@
                 tap(copyBtn, src + ' Copy'); await wait(0);
                 check(/Copied|Copy|Press Ctrl\+C/.test(copyBtn.textContent || ''), src + ' Copy button works', src + ' Copy button did not respond');
               }
+            }
+            if (/recipes/.test(src)) {
+              const hs = Array.from(doc.querySelectorAll('h2')).map((h) => h.textContent);
+              check(/Plain web/.test(hs.join()) && /Babylon/.test(hs.join()) && /Unity/.test(hs.join()), 'Recipes page has plain web, Babylon and Unity WebGL recipes', 'recipes page is missing a recipe (' + hs.join(' | ') + ')');
+              const out = Array.from(doc.querySelectorAll('.snip')).filter((b) => b.getBoundingClientRect().right > window.innerWidth + 1).length;
+              check(out === 0, 'Recipe code blocks stay inside the page (they scroll in their own box)', out + ' recipe code block(s) stick out of the page');
             }
             const de = doc.documentElement;
             check(de.scrollWidth <= de.clientWidth + 1, src + ' fits with no sideways scroll', src + ' scrolls sideways at ' + window.innerWidth + 'px');
