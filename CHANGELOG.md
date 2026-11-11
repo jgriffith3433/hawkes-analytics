@@ -2,6 +2,10 @@
 
 ## 1.4.1 (2026-11-10)
 
+- Unity compile gate: `tools/unity-check/` is a Unity 6 (`6000.3.7f1`) fixture that references
+  `Packages/com.hawkes.analytics` by local `file:` path so Studio's Gen compile-only check can compile the package
+  (and the Basic events sample via `Assets/BasicEvents`) and fail with file and line. README Contributing documents
+  CI's `DevTools/CompileCheck` and that Gen gate. No SDK API change.
 - Docs on the beta site: `npm run docs` (`tools/docs.mjs`) renders `docs/*.md` (quickstart, events, privacy, API) into
   static HTML under `dist/docs/` with the demo's look — left sidebar (Menu at phone width), on-page TOC, heading
   anchors, build-time syntax highlight and Copy on every code block. No runtime markdown fetch. The demo header links

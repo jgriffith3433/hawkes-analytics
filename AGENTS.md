@@ -13,7 +13,8 @@ first.
 - **Versions:** one for the repo, `1.<ANALYTICS_VERSION>.<patch>`, in `package.json`, the Unity `package.json` and the
   top of `CHANGELOG.md` (`tools/check.mjs` enforces it). A breaking change is a new major and a new `analytics@N.js`.
 - **Unity:** every file and folder under `Packages/com.hawkes.analytics` needs a `.meta` with its own GUID; never change
-  an existing GUID (games reference them). CI compiles the Runtime against `DevTools/CompileCheck/UnityEngineStub.cs`.
+  an existing GUID (games reference them). CI compiles Runtime + Samples against `DevTools/CompileCheck/UnityEngineStub.cs`.
+  `tools/unity-check/` is a Unity 6 fixture (local `file:` path to the package) for Studio's Gen compile-only gate.
 - **Checks:** `npm test` (the SDK in a fake browser, the loader, then `tools/check.mjs`).
 - **Branches:** dev -> beta -> main. Pull requests into beta merge themselves when checks pass (`beta-automerge.yml`,
   label `hold` stops it). main is Jaycee's: it moves when beta goes live, and `release.yml` then tags `v<version>` and

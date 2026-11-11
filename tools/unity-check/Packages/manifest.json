@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "com.hawkes.analytics": "file:../../../Packages/com.hawkes.analytics",
+    "com.unity.modules.imgui": "1.0.0"
+  }
+}

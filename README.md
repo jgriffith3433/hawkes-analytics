@@ -192,4 +192,11 @@ One version for the whole repo, tagged `v<version>`: `1.<SDK version>.<patch>`. 
 Branches: work goes into `dev` or a branch, pull requests into `beta` merge themselves once checks pass, and `main`
 moves when beta goes live; a new version on main is tagged and released by itself (`.github/workflows/release.yml`).
 
+## Contributing
+
+Compile check: CI runs `dotnet build DevTools/CompileCheck` (Runtime + Samples, with and without `UNITY_WEBGL`); Studio's
+Gen compile-only gate builds `tools/unity-check/` (Unity 6, local `file:` path to the package) and fails with file and line.
+
+`npm test` covers the browser SDK, the loader and `tools/check.mjs` (one version everywhere, `.meta` GUIDs).
+
 License: MIT.
