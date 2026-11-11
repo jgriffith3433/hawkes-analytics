@@ -4,5 +4,8 @@
 EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
-  m_Scenes: []
+  m_Scenes:
+  - enabled: 1
+    path: Assets/BasicEvents/HawkesAnalyticsSample.unity
+    guid: 687984a19e11368dd0820edc6a7e2bf4
   m_configObjects: {}
