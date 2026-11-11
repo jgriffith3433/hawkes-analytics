@@ -25,48 +25,93 @@
       if (h && h.version) return h[m].apply(h, args);
       window.hawkesAnalyticsQ.push([m].concat(args));
     }
-
-    // Send one event to Hawkes Gen and wait for its answer: no polling, one request, one 10 second limit. The answer is
-    // Gen's own 202 { accepted }. Anything else (blocked, offline, refused, dropped, silent) is "not acknowledged".
-    // Opt-out stops this too: the demo must not prove the road when the player asked for silence.
-    const GEN_PRODUCT = 'hawkes-analytics', GEN_WAIT = 10000;
-    const rnd = () => Array.from(crypto.getRandomValues(new Uint8Array(9)), (x) => (x % 36).toString(36)).join('');
-    // Shared with the body UI (live list ack lines): one object, defined here so smoke works even if the body script fails.
+    const GEN_WAIT = 10000;
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    // Shared with the body UI (it reads the acknowledged count): one object, defined here so the contract works even if the body script fails.
     const acks = (window.__hawkesDemoAcks = window.__hawkesDemoAcks || {});
-    let sendN = 0, ackWaiters = [];
-    const sendDone = (r) => { ackWaiters.splice(0).forEach((f) => f(r)); };
+    const sdk = () => window.hawkesAnalytics && window.hawkesAnalytics.version ? window.hawkesAnalytics : null;
+
+    // ---- The listener hub: everything the demo and the playtest know about an event's journey comes from the SDK's own
+    // on('queued' | 'batched' | 'sent' | 'acked' | 'dropped') callbacks. Nothing here polls: a wait is a promise that a
+    // listener call (or its single time limit) settles.
+    const feed = [], watchers = [];
+    const hub = (type) => (info) => {
+      const rec = { type, i: info, t: Date.now() };
+      feed.push(rec);
+      watchers.slice().forEach((w) => w(rec));
+    };
+    ['queued', 'batched', 'sent', 'acked', 'dropped'].forEach((t) => demoCall('on', t, hub(t)));
+    const fieldsN = (i) => (i && i.fields ? i.fields.n : undefined);
+
+    // Resolve when cond() is true (checked now and after every listener call); reject with failIf's message, or on the limit.
+    function until(cond, ms, what, failIf) {
+      return new Promise((resolve, reject) => {
+        let timer = null;
+        const done = (fn, v) => { clearTimeout(timer); const k = watchers.indexOf(check); if (k >= 0) watchers.splice(k, 1); fn(v); };
+        const check = (rec) => {
+          const m = rec && failIf ? failIf(rec) : '';
+          if (m) return done(reject, new Error(m));
+          if (cond()) done(resolve);
+        };
+        if (cond()) return resolve();
+        watchers.push(check);
+        timer = setTimeout(() => done(reject, new Error(typeof what === 'function' ? what() : what)), ms);
+      });
+    }
+
+    // The SDK script arrives async. Its load/error events (capture phase: they do not bubble) wake the waiters; no loop.
+    let sdkSettled = false; const sdkWake = [];
+    const isSdkTag = (e) => !!(e && e.target && e.target.src && /\/sdk\/analytics(@\d+)?\.js/.test(e.target.src));
+    ['load', 'error'].forEach((t) => window.addEventListener(t, (e) => { if (isSdkTag(e)) { sdkSettled = true; sdkWake.splice(0).forEach((f) => f()); } }, true));
+    function sdkReady(ms) {
+      return new Promise((resolve) => {
+        if (sdk() || sdkSettled) return resolve(!!sdk());
+        const t = setTimeout(() => resolve(!!sdk()), ms || GEN_WAIT);
+        sdkWake.push(() => { clearTimeout(t); resolve(!!sdk()); });
+      });
+    }
+
+    // ---- Send: one demo_send through the SDK, the way a game would. Its row, and this line, follow the listener calls.
+    const rnd = () => Array.from(crypto.getRandomValues(new Uint8Array(9)), (x) => (x % 36).toString(36)).join('');
+    const sends = {}; let sendN = 0, sendTimer = null;
+    function renderSend() {
+      const out = document.getElementById('send-result'); if (!out || !sendN) return;
+      const s = sends[sendN];
+      let text;
+      if (s.state === 'dropped') text = s.reason === 'opted out' ? 'Opted out: nothing was sent.' : 'Dropped (' + s.reason + '): nothing was sent.';
+      else if (s.state === 'acked') {
+        const mates = Object.keys(sends).filter((k) => sends[k].batch && sends[k].batch === s.batch && sends[k].state === 'acked').length;
+        text = mates > 1 ? 'Acknowledged by Hawkes Gen: ' + mates + ' events accepted in one batch.' : 'Acknowledged by Hawkes Gen: event #' + sendN + ' accepted.';
+      } else if (s.state === 'timeout') text = 'No event reached Hawkes Gen within 10 seconds';
+      else if (s.state === 'sent') text = 'Sent. Waiting for Hawkes Gen…';
+      else text = 'Queued. It goes out with the next batch…';
+      out.textContent = text;
+      if (typeof window.__hawkesDemoUi === 'function') window.__hawkesDemoUi();
+    }
+    ['queued', 'batched', 'sent', 'acked', 'dropped'].forEach((t) => watchers.push((rec) => {
+      if (rec.type !== t || rec.i.name !== 'demo_send') return;
+      const n = fieldsN(rec.i), s = sends[n]; if (!s) return;
+      s.state = t === 'batched' ? 'queued' : t; if (rec.i.batch) s.batch = rec.i.batch; if (rec.i.reason) s.reason = rec.i.reason;
+      if (t === 'acked') { acks[n] = { ok: true }; }
+      if (!Object.keys(sends).some((k) => sends[k].state === 'queued' || sends[k].state === 'sent')) { clearTimeout(sendTimer); sendTimer = null; }
+      renderSend();
+    }));
     function sendToGen() {
-      const n = ++sendN, out = document.getElementById('send-result');
-      const h = window.hawkesAnalytics;
-      const cfg = h && h.config ? h.config() : {};
-      const finish = (ok, text) => { acks[n] = { ok, text }; if (out) out.textContent = text; if (typeof window.__hawkesDemoUi === 'function') window.__hawkesDemoUi(); sendDone({ ok, text, n }); };
-      if (cfg.optedOut) {
-        demoCall('track', 'demo_send', { n }); // dropped with 'opted out' for listeners; nothing is sent
-        if (out) out.textContent = 'Opted out: nothing was sent.';
-        finish(false, 'Opted out: nothing was sent.');
-        return;
-      }
-      demoCall('track', 'demo_send', { n });
-      if (out) out.textContent = 'Sent. Waiting for Hawkes Gen…';
-      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), GEN_WAIT);
-      const body = JSON.stringify({ product: GEN_PRODUCT, anon: 'a_' + rnd(), session: 's_' + rnd(),
-        flags: { playtest: !!(window.hawkesPlaytest && window.hawkesPlaytest._running), webdriver: !!navigator.webdriver, internal: true },
-        events: [{ name: 'demo_send', seq: n, t: Date.now(), active: 0, page: location.pathname, props: { n } }] });
-      let go;
-      try { go = fetch(cfg.endpoint || 'https://hawkesgen.ai/v1/analytics/collect', { method: 'POST', body, headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, credentials: 'omit', signal: ctl.signal }); }
-      catch (e) { go = Promise.reject(e); }
-      go.then((r) => r.json().catch(() => ({})).then((j) => ({ status: r.status, j })))
-        .then(({ status, j }) => {
-          clearTimeout(t);
-          if (status >= 200 && status < 300 && j && j.accepted >= 1) finish(true, 'Acknowledged by Hawkes Gen: event #' + n + ' accepted.');
-          else finish(false, 'No event reached Hawkes Gen within 10 seconds');
-        }, () => { clearTimeout(t); finish(false, 'No event reached Hawkes Gen within 10 seconds'); });
+      const n = ++sendN, h = sdk();
+      const off = !!(h && h.config && h.config().optedOut);
+      sends[n] = { state: off ? 'dropped' : 'queued', reason: off ? 'opted out' : '' };
+      demoCall('track', 'demo_send', { n });   // opted out: the SDK drops it with reason "opted out" and says so to listeners
+      renderSend();
+      if (off) { acks[n] = { ok: false }; return; }
+      // One time limit for the press (not a timer that fetches): a send nobody acknowledged says so.
+      clearTimeout(sendTimer);
+      sendTimer = setTimeout(() => { sendTimer = null; Object.keys(sends).forEach((k) => { if (sends[k].state === 'queued' || sends[k].state === 'sent') sends[k].state = 'timeout'; }); renderSend(); }, GEN_WAIT);
     }
 
     // A bad custom name: the SDK skips it and warns once. The demo shows that warning on the page (not only in the console).
     function sendBadName() {
       const out = document.getElementById('warn-result');
-      const h = window.hawkesAnalytics;
+      const h = sdk();
       let caught = '';
       const prev = console.warn;
       console.warn = function () {
@@ -75,7 +120,7 @@
         return prev.apply(console, arguments);
       };
       try {
-        if (h && h.version) h.track('Shop Purchase', { n: 1 });
+        if (h) h.track('Shop Purchase', { n: 1 });
         else demoCall('track', 'Shop Purchase', { n: 1 });
       } finally { console.warn = prev; }
       const text = caught || '[hawkes-analytics] The event name "Shop Purchase" was skipped (it has spaces): names are 2 to 40 characters, start with a lowercase letter, and use only a-z, 0-9 and _. Rename it, for example "shop_purchase".';
@@ -84,316 +129,350 @@
       return text;
     }
 
-    // Studio's playtest contract (docs: hawkesstudio/docs/playtest.md).
-    // smoke / phone / mobile all exercise the page through real presses (Send, scroll, opt-out, bad name).
-    // Each step logs a scene event so the runner screenshots it. phone/mobile add layout or batching checks.
+    // ---- Docs links: every internal link on the demo and on the docs pages must answer 200. Pure: get(url) -> {status, text}.
+    // The crawl follows links between the site's own pages; it fails naming each broken link and the page that holds it.
+    async function checkLinks(get, pageUrl) {
+      const home = new URL('./', pageUrl), broken = [], seen = {}, todo = [{ url: new URL(pageUrl).href, from: 'the test' }];
+      let checked = 0;
+      while (todo.length) {
+        const cur = todo.shift(), key = cur.url.split('#')[0];
+        if (seen[key]) continue;
+        seen[key] = true;
+        let r;
+        try { r = await get(key); } catch (e) { r = { status: 0, text: '' }; }
+        checked++;
+        if (r.status !== 200) { broken.push({ link: cur.link || cur.url, url: key, from: cur.from, status: r.status }); continue; }
+        if (!/(^|\/)[^./]*$|\.html?$/.test(new URL(key).pathname)) continue;   // only pages are read for more links
+        const re = /<a\s[^>]*?href\s*=\s*("([^"]*)"|'([^']*)')/gi; let m;
+        while ((m = re.exec(r.text))) {
+          const href = (m[2] !== undefined ? m[2] : m[3]).replace(/&amp;/g, '&');
+          if (!href || href[0] === '#' || /^(mailto:|tel:|javascript:)/i.test(href)) continue;
+          let u; try { u = new URL(href, key); } catch (e) { continue; }
+          if (u.origin !== home.origin || u.pathname.indexOf(home.pathname) !== 0) continue;   // internal means this site
+          todo.push({ url: u.href, link: href, from: key.slice(home.href.length) || './' });
+        }
+      }
+      return { broken, checked };
+    }
+    const getPage = (url) => fetch(url, { cache: 'no-store' }).then((r) => r.text().then((text) => ({ status: r.status, text })));
+
+    // ---- Studio's playtest contract (docs: hawkesstudio/docs/playtest.md).
+    // smoke / phone / inspector / mobile / docs. Each scenario is a list of named steps; a step that fails says its name.
     const pt = { _running: false, run: null, status: 'idle', scene: 'Demo page', progress: 0, events: [], problems: [], t0: 0 };
     const ev = (type, detail) => pt.events.push({ t: +((Date.now() - pt.t0) / 1000).toFixed(2), type, detail });
-    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    let cur = '';
     const bad = (m) => { ev('fail', m); pt.problems.push({ severity: 'bug', message: m }); };
+    const fail = (m) => bad('Step "' + cur + '": ' + m);
     const ok = (m) => ev('pass', m);
-    const scene = (name, progress) => { pt.scene = name; pt.progress = progress; ev('scene', name); };
+    const check = (cond, good, notGood) => { if (cond) ok(good); else fail(notGood); return !!cond; };
+    const ABORT = { aborted: true };
+    // Run one named step. A throw inside is the step failing for good: it is recorded with its name and the scenario stops.
+    async function step(name, progress, fn) {
+      cur = name; pt.scene = name; pt.progress = progress; ev('scene', name);
+      try { await fn(); } catch (e) { if (e !== ABORT) fail(String(e && e.message || e)); throw ABORT; }
+    }
     const R = (el) => el.getBoundingClientRect();
+    const show = (el) => { el.scrollIntoView({ block: 'center' }); return wait(0); };
+    // A tap: pointer events like a finger's, then the click the browser would make.
+    function tap(el, label) {
+      ev('press', label);
+      const o = { bubbles: true, cancelable: true, pointerType: 'touch', isPrimary: true };
+      try { el.dispatchEvent(new PointerEvent('pointerdown', o)); el.dispatchEvent(new PointerEvent('pointerup', o)); } catch (e) { /* no pointer events */ }
+      el.click();
+    }
+    const sinceMark = (mark) => feed.slice(mark);
+    const hscroll = () => document.documentElement.scrollWidth - document.documentElement.clientWidth;
     const carrying = (n) => window.hawkesRequests.filter((r) => r.events.indexOf(n) >= 0);
 
-    async function waitForSdk(limitMs) {
-      const steps = Math.ceil((limitMs || 10000) / 100);
-      for (let i = 0; i < steps && !(window.hawkesAnalytics && window.hawkesAnalytics.version); i++) await wait(100);
-      return !!(window.hawkesAnalytics && window.hawkesAnalytics.version);
+    async function stepSdk() {
+      await step('SDK loaded with its listener API', 0.05, async () => {
+        if (!(await sdkReady(GEN_WAIT))) throw new Error('the SDK never arrived from https://hawkesgen.ai/sdk/analytics@1.js (blocked, offline or not served)');
+        const h = sdk();
+        ev('measure', 'SDK v' + h.version + ', product ' + (h.config().product || 'none') + ', on(): ' + (typeof h.on));
+        if (typeof h.on !== 'function') throw new Error('the SDK served at /sdk/analytics@1.js (v' + h.version + ') has no on() listener API, so no event can be followed from queued to acknowledged: Hawkes Gen\'s copy is behind this repository (sync it from the latest tag)');
+        if (!h.config().product) throw new Error('the SDK has no product, so it sends nothing');
+        ok('The SDK is loaded (v' + h.version + ') and has the listener API');
+        // Named setup shortcut: opt-out is remembered by the browser, so a run that finds it on starts by opting in.
+        if (h.config().optedOut) { ev('state', 'this browser was opted out from an earlier visit: opted in for the run'); h.optIn(); if (typeof window.__hawkesDemoUi === 'function') window.__hawkesDemoUi(); }
+      });
     }
 
-    // Shared path every scenario plays: three steps, Send→ack, What we send, opt-out (nothing sent), bad name warning.
-    async function exercisePage() {
-      scene('Step 1: Add the script', 0.1);
-      document.getElementById('step-1').scrollIntoView({ block: 'center' }); await wait(400);
-
-      scene('Step 2: Send an event', 0.25);
-      document.getElementById('step-2').scrollIntoView({ block: 'center' }); await wait(300);
-      if (!(await waitForSdk(10000))) { bad('The SDK never arrived'); return false; }
-
-      const btn = document.getElementById('send-event');
-      btn.scrollIntoView({ block: 'center' }); await wait(200);
-      const ack = new Promise((res) => ackWaiters.push(res));
-      ev('press', 'Send an event to Hawkes Gen');
-      btn.click();
-      const r = await ack;
-      if (r.ok) { ev('acknowledged', r.text); ok('Hawkes Gen acknowledged the event'); }
-      else { ev('not-acknowledged', r.text); bad(r.text); return false; }
-
-      scene('Step 3: Watch it appear', 0.45);
-      document.getElementById('step-3').scrollIntoView({ block: 'center' }); await wait(500);
-      let row = null;
-      for (let i = 0; i < 120; i++) {
-        row = document.querySelector('#events li[data-name="demo_send"][data-state="acked"]');
-        if (row) break;
-        await wait(100);
-      }
-      const first = document.querySelector('#events li[data-name="demo_send"]');
-      ev('state', first ? 'demo_send row: ' + first.dataset.state + ', ' + first.querySelector('.ms').textContent : 'no demo_send row');
-      if (row) ok('The demo_send row went queued, sent, acknowledged by itself'); else bad('The demo_send row never reached acknowledged');
-      if (row) {
-        row.scrollIntoView({ block: 'center' }); await wait(200);
-        ev('press', 'tap the demo_send row');
-        row.querySelector('button').click(); await wait(300);
+    // Press Send once and wait, on the listeners, for acknowledged.
+    async function stepSend(progress) {
+      await step('Send an event and see it acknowledged', progress, async () => {
+        const btn = document.getElementById('send-event'), mark = feed.length;
+        await show(document.getElementById('step-2')); await show(btn);
+        tap(btn, 'Send an event to Hawkes Gen');
+        const mine = () => sinceMark(mark).filter((r) => r.i.name === 'demo_send');
+        await until(() => mine().some((r) => r.type === 'acked'), GEN_WAIT, () => mine().some((r) => r.type === 'sent')
+          ? 'No event reached Hawkes Gen within 10 seconds: it was sent but never acknowledged (blocked or refused)'
+          : 'No event reached Hawkes Gen within 10 seconds: it never left the queue',
+          (rec) => rec.i.name === 'demo_send' && rec.type === 'dropped' ? 'the event was dropped (' + rec.i.reason + '), not acknowledged' : '');
+        const a = mine().filter((r) => r.type === 'acked')[0];
+        ev('acknowledged', 'demo_send ' + a.i.id + ' in batch ' + a.i.batch + ', ' + (a.i.ackedAt - a.i.sentAt) + ' ms');
+        ok('Hawkes Gen acknowledged the event');
+        await wait(0);   // the inspector's own listener runs in the same call: let it finish
+        await show(document.getElementById('step-3'));
+        const row = document.querySelector('#events li[data-name="demo_send"][data-state="acked"]');
+        ev('state', 'demo_send row: ' + (row ? row.dataset.state + ', ' + row.querySelector('.ms').textContent : 'none'));
+        if (!row) throw new Error('the demo_send row in the inspector did not reach acknowledged');
+        ok('The demo_send row went queued, sent, acknowledged by itself');
+        await show(row);
+        tap(row.querySelector('button'), 'tap the demo_send row'); await wait(0);
         const pre = row.querySelector('pre');
-        ev('state', 'expanded: ' + (pre.hidden ? 'hidden' : pre.textContent.replace(/\s+/g, ' ').slice(0, 160)));
-        if (!pre.hidden && /"name": "demo_send"/.test(pre.textContent) && /acknowledged in \d+ ms/.test(pre.textContent)) ok('Tapping the row shows the exact fields sent and the time it took');
-        else bad('Tapping the row did not show the fields and time');
+        check(!pre.hidden && /"name": "demo_send"/.test(pre.textContent) && /acknowledged in \d+ ms/.test(row.textContent), 'Tapping the row shows the exact fields sent and the time it took', 'tapping the row did not show the fields and the time');
         const box = document.getElementById('events'), sec = document.getElementById('step-3');
-        ev('measure', 'inspector ' + Math.round(R(box).width) + 'px wide in a card ' + Math.round(R(sec).width) + 'px, page ' + document.documentElement.scrollWidth + '/' + document.documentElement.clientWidth);
-        if (R(box).right > R(sec).right + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) bad('The inspector does not fit the screen');
-        else ok('The inspector fits the screen' + (box.scrollHeight > box.clientHeight ? ' and long rows scroll inside the card' : ''));
-      }
-
-      scene('What we send', 0.55);
-      document.getElementById('privacy').scrollIntoView({ block: 'start' }); await wait(400);
-
-      scene('Opt out', 0.7);
-      const tg = document.getElementById('optout-toggle'), lab = tg.closest('label');
-      lab.scrollIntoView({ block: 'center' }); await wait(300);
-      if (window.hawkesAnalytics) window.hawkesAnalytics.flush(); await wait(200);
-      const before = window.hawkesRequests.length;
-      const logBefore = (window.hawkesAnalytics.debugLog || []).length;
-      ev('press', 'opt-out switch'); lab.click(); await wait(150);
-      const line = document.getElementById('optout-line');
-      ev('state', line.hidden ? 'no off line' : line.textContent);
-      if (line.hidden || !tg.checked) bad('Tapping the switch did not show that sending is off');
-      else ok('Sending is off is shown');
-
-      const trackBtn = document.querySelector('[data-call="track"]');
-      trackBtn.scrollIntoView({ block: 'center' }); await wait(200);
-      ev('press', 'track while opted out'); trackBtn.click();
-      if (window.hawkesAnalytics) window.hawkesAnalytics.flush(); await wait(500);
-      const after = window.hawkesRequests.length;
-      const logAfter = (window.hawkesAnalytics.debugLog || []).length;
-      ev('state', 'requests ' + before + '→' + after + ', debugLog ' + logBefore + '→' + logAfter);
-      if (after !== before) bad('A request went out while opted out');
-      else ok('Nothing sent while opted out');
-      if (logAfter !== logBefore) bad('An event was recorded while opted out');
-      else ok('Nothing recorded while opted out');
-
-      scene('Bad event name', 0.85);
-      const badBtn = document.getElementById('bad-name');
-      badBtn.scrollIntoView({ block: 'center' }); await wait(200);
-      ev('press', 'Send a bad event name');
-      badBtn.click(); await wait(200);
-      const warn = document.getElementById('warn-result');
-      ev('state', warn.hidden ? 'no warning' : warn.textContent.slice(0, 120));
-      if (warn.hidden || !/skipped/.test(warn.textContent)) bad('Bad event name did not show the warning');
-      else ok('Bad event name warning is shown');
-
-      // Leave the page sending again so a later scenario (or a person) is not stuck opted out.
-      if (tg.checked) { ev('press', 'opt-out switch back on'); lab.click(); await wait(100); }
-      return pt.problems.length === 0;
+        ev('measure', 'inspector ' + Math.round(R(box).width) + 'px wide in a card ' + Math.round(R(sec).width) + 'px, page overflow ' + hscroll() + 'px');
+        check(R(box).right <= R(sec).right + 1 && hscroll() <= 1, 'The inspector fits the screen', 'the inspector does not fit the screen');
+      });
     }
 
-    async function layoutChecks() {
-      scene('Layout: step 1 snippet', 0.92);
-      document.getElementById('step-1').scrollIntoView({ block: 'center' }); await wait(200);
-      const pre = document.getElementById('snip-1'), cp = document.querySelector('[data-copy="snip-1"]');
-      const a1 = R(cp), p1 = R(pre);
-      ev('measure', 'step 1 Copy ' + Math.round(a1.width) + 'x' + Math.round(a1.height) + ', snippet scrollWidth ' + pre.scrollWidth + ' / clientWidth ' + pre.clientWidth);
-      if (a1.height < 44 || a1.width < 44) bad('Copy button is smaller than 44px'); else ok('Copy button is at least 44px');
-      if (a1.bottom > p1.top + 1) bad('Copy button overlaps the snippet'); else ok('Copy button sits above the code');
-      if (pre.scrollWidth > pre.clientWidth + 1) bad('Step 1 snippet scrolls sideways (cut off)'); else ok('Step 1 snippet is fully visible');
-
-      scene('Layout: What we send', 0.95);
-      document.getElementById('privacy').scrollIntoView({ block: 'start' }); await wait(200);
-      const de = document.documentElement, panel = document.getElementById('privacy'), last = document.getElementById('send-last');
-      ev('measure', 'What we send: panel scrollWidth ' + panel.scrollWidth + ' / clientWidth ' + panel.clientWidth + ', page ' + de.scrollWidth + ' / ' + de.clientWidth);
-      if (panel.scrollWidth > panel.clientWidth + 1 || de.scrollWidth > de.clientWidth + 1 || last.scrollWidth > last.clientWidth + 1) bad('What we send scrolls sideways');
-      else ok('What we send fits with no sideways scroll');
-
+    async function stepOptOutAndBadName(progress) {
       const tg = document.getElementById('optout-toggle'), lab = tg.closest('label');
-      lab.scrollIntoView({ block: 'center' }); await wait(200);
-      const l = R(lab);
-      ev('measure', 'opt-out switch ' + Math.round(l.width) + 'x' + Math.round(l.height));
-      if (l.height < 44) bad('Opt-out switch is shorter than 44px'); else ok('Opt-out switch is at least 44px tall');
+      await step('Opt out: nothing is sent and the row says why', progress, async () => {
+        const h = sdk(); h.flush();
+        await show(document.getElementById('privacy'));
+        await show(lab);
+        const before = window.hawkesRequests.length, logBefore = (h.debugLog || []).length, mark = feed.length;
+        tap(lab, 'opt-out switch');
+        const line = document.getElementById('optout-line');
+        check(!line.hidden && tg.checked, 'Sending is off is shown', 'tapping the switch did not show that sending is off');
+        const trackBtn = document.querySelector('[data-call="track"]');
+        await show(trackBtn);
+        tap(trackBtn, 'track while opted out');
+        await until(() => sinceMark(mark).some((r) => r.type === 'dropped' && r.i.name === 'demo_click'), 3000, 'the SDK never said the event was dropped');
+        const drop = sinceMark(mark).filter((r) => r.type === 'dropped' && r.i.name === 'demo_click')[0];
+        ev('listener', 'dropped: demo_click, reason "' + drop.i.reason + '"');
+        check(drop.i.reason === 'opted out', 'The dropped event says why: opted out', 'the dropped event\'s reason is "' + drop.i.reason + '", not "opted out"');
+        h.flush();   // anything that could be waiting goes (or not) right now: sends are synchronous
+        check(window.hawkesRequests.length === before, 'Nothing sent while opted out', 'a request went out while opted out');
+        check((h.debugLog || []).length === logBefore, 'Nothing recorded while opted out', 'an event was recorded while opted out');
+        await wait(0);
+        const row = document.querySelector('#events li[data-name="demo_click"][data-state="dropped"]');
+        if (!row) throw new Error('the inspector has no dropped demo_click row');
+        await show(row);
+        ev('state', 'dropped row: ' + row.querySelector('.pill').textContent);
+        check(/opted out/.test(row.querySelector('.pill').textContent), 'The dropped row shows the reason: opted out', 'the dropped row does not show "opted out" (it says "' + row.querySelector('.pill').textContent + '")');
+      });
+      await step('Bad event name: skipped, with its warning', progress + 0.1, async () => {
+        if (tg.checked) { await show(lab); tap(lab, 'opt-out switch back on'); }
+        const badBtn = document.getElementById('bad-name'), mark = feed.length;
+        await show(badBtn);
+        tap(badBtn, 'Send a bad event name');
+        const warn = document.getElementById('warn-result');
+        await until(() => sinceMark(mark).some((r) => r.type === 'dropped' && r.i.reason === 'bad name'), 3000, 'the SDK never said the bad name was dropped');
+        ev('state', warn.hidden ? 'no warning' : warn.textContent.slice(0, 120));
+        check(!warn.hidden && /skipped/.test(warn.textContent) && /Shop Purchase/.test(warn.textContent), 'The bad event name warning is shown', 'the bad event name did not show its warning');
+        await wait(0);
+        const row = document.querySelector('#events li[data-name="Shop Purchase"][data-state="dropped"]');
+        check(!!row && /bad name/.test(row.textContent), 'The inspector has a dropped row: bad name', 'the inspector has no dropped row with "bad name" for the skipped name');
+        await show(warn);
+      });
     }
 
-    async function batchingChecks() {
-      scene('Batching: five taps', 0.92);
-      const tag = document.querySelector('script[src*="analytics@1.js"]');
-      ev('measure', 'SDK tag: ' + (tag ? tag.outerHTML : 'missing'));
-      if (tag && tag.async && !tag.defer && tag.hasAttribute('async')) ok('SDK script tag is async'); else bad('SDK script tag is not async');
-      const nav = performance.getEntriesByType('navigation')[0], interactive = nav ? Math.round(nav.domInteractive) : -1;
-      ev('measure', 'interactive (domInteractive) at ' + interactive + ' ms');
-      if (interactive < 0 || interactive > 3000) bad('Page not interactive within 3 seconds'); else ok('Page interactive within 3 seconds');
-      if (!(await waitForSdk(10000))) { bad('The SDK never arrived'); return; }
-      window.hawkesAnalytics.flush(); await wait(200);
-      const btn = document.getElementById('quick-click'), base = window.hawkesRequests.length;
-      btn.scrollIntoView({ block: 'center' }); await wait(200);
-      for (let i = 1; i <= 5; i++) { ev('press', 'Quick click ' + i); btn.click(); await wait(150); }
-      ev('state', 'taps done, requests since: ' + (window.hawkesRequests.length - base));
-      if (window.hawkesRequests.length !== base) bad('A request went out while the taps were still coming'); else ok('Nothing sent while the taps kept coming');
-      await wait(3500);
-      const got = carrying('demo_quick');
-      ev('measure', 'requests carrying the taps: ' + got.length + (got[0] ? ' with ' + got[0].events.filter((x) => x === 'demo_quick').length + ' taps' : ''));
-      if (got.length === 1 && got[0].events.filter((x) => x === 'demo_quick').length === 5) ok('Five quick clicks sent one batched request');
-      else bad('Five quick clicks did not send exactly one batched request (' + got.length + ' requests)');
+    async function stepDocsLinks(progress) {
+      await step('Docs links return 200', progress, async () => {
+        const r = await checkLinks(getPage, location.href);
+        ev('measure', 'checked ' + r.checked + ' pages and links, ' + r.broken.length + ' broken');
+        r.broken.forEach((b) => fail('docs link "' + b.link + '" (' + b.url + ') returns ' + (b.status || 'no answer') + ', linked from ' + b.from));
+        if (!r.broken.length) ok('Every internal docs link returns 200 (' + r.checked + ' checked)');
+      });
+    }
 
-      scene('Batching: hide sends', 0.97);
-      window.hawkesAnalytics.track('demo_hide'); const b2 = window.hawkesRequests.length;
-      ev('press', 'hide the page (visibilitychange to hidden, as a phone does when you switch app)');
-      try { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); }
-      catch (e) { bad('Could not hide the page: ' + e.message); }
-      const sent = window.hawkesRequests.slice(b2).filter((r) => r.events.indexOf('demo_hide') >= 0);
-      ev('state', 'sent at once on hide: ' + sent.length + ' request(s)' + (sent[0] ? ' (' + sent[0].events.join(', ') + ')' : ''));
-      if (sent.length === 1) ok('Hiding the page sent the queued events at once'); else bad('Hiding the page did not send the queued event');
-      try { delete document.visibilityState; } catch (e) { /* ignore */ }
-      document.dispatchEvent(new Event('visibilitychange'));
+    async function stepNoSideways(progress) {
+      await step('No sideways scroll at ' + window.innerWidth + 'px', progress, async () => {
+        const secs = ['step-1', 'step-2', 'step-3', 'privacy', 'optout', 'batching', 'offline', 'unity'], wide = [];
+        for (let i = 0; i < secs.length; i++) {
+          const el = document.getElementById(secs[i]); await show(el);
+          if (hscroll() > 1 || el.scrollWidth > el.clientWidth + 1 || R(el).right > window.innerWidth + 1) wide.push(secs[i]);
+        }
+        ev('measure', 'viewport ' + window.innerWidth + 'x' + window.innerHeight + ', touch ' + (('ontouchstart' in window) || navigator.maxTouchPoints > 0) + ', page ' + document.documentElement.scrollWidth + '/' + document.documentElement.clientWidth);
+        check(!wide.length, 'No section scrolls sideways', 'sideways scroll in ' + wide.join(', '));
+      });
+    }
+
+    async function stepLayout(progress) {
+      await step('Phone layout: Copy, snippet and switch', progress, async () => {
+        await show(document.getElementById('step-1'));
+        const pre = document.getElementById('snip-1'), cp = document.querySelector('[data-copy="snip-1"]'), a1 = R(cp), p1 = R(pre);
+        ev('measure', 'step 1 Copy ' + Math.round(a1.width) + 'x' + Math.round(a1.height) + ', snippet scrollWidth ' + pre.scrollWidth + ' / clientWidth ' + pre.clientWidth);
+        check(a1.height >= 44 && a1.width >= 44, 'Copy button is at least 44px', 'Copy button is smaller than 44px');
+        check(a1.bottom <= p1.top + 1, 'Copy button sits above the code', 'Copy button overlaps the snippet');
+        check(pre.scrollWidth <= pre.clientWidth + 1, 'Step 1 snippet is fully visible', 'step 1 snippet scrolls sideways (cut off)');
+        const lab = document.getElementById('optout-toggle').closest('label'); await show(lab);
+        ev('measure', 'opt-out switch ' + Math.round(R(lab).width) + 'x' + Math.round(R(lab).height));
+        check(R(lab).height >= 44, 'Opt-out switch is at least 44px tall', 'opt-out switch is shorter than 44px');
+      });
+    }
+
+    // Five quick taps travel as one batch, and hiding the page sends what waits. Waits are on the listeners.
+    async function stepBatching(progress) {
+      await step('Batching: five taps, one request', progress, async () => {
+        const tag = document.querySelector('script[src*="analytics@1.js"]');
+        ev('measure', 'SDK tag: ' + (tag ? tag.outerHTML : 'missing'));
+        check(tag && tag.hasAttribute('async') && !tag.defer, 'SDK script tag is async', 'SDK script tag is not async');
+        const nav = performance.getEntriesByType('navigation')[0], interactive = nav ? Math.round(nav.domInteractive) : -1;
+        ev('measure', 'interactive (domInteractive) at ' + interactive + ' ms');
+        check(interactive >= 0 && interactive <= 3000, 'Page interactive within 3 seconds', 'page not interactive within 3 seconds');
+        sdk().flush();
+        const btn = document.getElementById('quick-click'), base = window.hawkesRequests.length, mark = feed.length;
+        await show(btn);
+        for (let i = 1; i <= 5; i++) { tap(btn, 'Quick click ' + i); await wait(120); }
+        check(window.hawkesRequests.length === base, 'Nothing sent while the taps kept coming', 'a request went out while the taps were still coming');
+        await until(() => sinceMark(mark).filter((r) => r.type === 'sent' && r.i.name === 'demo_quick').length >= 5, GEN_WAIT, 'the five taps were never sent');
+        const got = carrying('demo_quick');
+        ev('measure', 'requests carrying the taps: ' + got.length + (got[0] ? ' with ' + got[0].events.filter((x) => x === 'demo_quick').length + ' taps' : ''));
+        check(got.length === 1 && got[0].events.filter((x) => x === 'demo_quick').length === 5, 'Five quick clicks sent one batched request', 'five quick clicks did not send exactly one batched request (' + got.length + ' requests)');
+      });
+      await step('Batching: hiding the page sends at once', progress + 0.05, async () => {
+        sdk().track('demo_hide'); const b2 = window.hawkesRequests.length;
+        ev('press', 'hide the page (visibilitychange to hidden, as a phone does when you switch app)');
+        try { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); }
+        catch (e) { throw new Error('could not hide the page: ' + e.message); }
+        finally { try { delete document.visibilityState; } catch (e) { /* ignore */ } document.dispatchEvent(new Event('visibilitychange')); }
+        const sent = window.hawkesRequests.slice(b2).filter((r) => r.events.indexOf('demo_hide') >= 0);
+        ev('state', 'sent at once on hide: ' + sent.length + ' request(s)');
+        check(sent.length === 1, 'Hiding the page sent the queued events at once', 'hiding the page did not send the queued event');
+      });
+    }
+
+    // The inspector: five Send taps, one batch, all acknowledged.
+    async function stepFiveSends(progress) {
+      await step('Five quick Sends share one acknowledged batch', progress, async () => {
+        sdk().flush();   // what the page recorded so far goes now, so these five start a fresh burst
+        const btn = document.getElementById('send-event'), mark = feed.length;
+        await show(document.getElementById('step-2')); await show(btn);
+        for (let i = 1; i <= 5; i++) { tap(btn, 'Send ' + i + ' of 5'); await wait(120); }
+        const mine = (type) => sinceMark(mark).filter((r) => r.i.name === 'demo_send' && (!type || r.type === type));
+        check(mine('sent').length === 0, 'Nothing was sent while the taps kept coming', 'an event was sent before the five taps were done');
+        await until(() => mine('acked').length >= 5, GEN_WAIT, () => 'No event reached Hawkes Gen within 10 seconds: ' + mine('queued').length + ' queued, ' + mine('sent').length + ' sent, ' + mine('acked').length + ' of 5 acknowledged',
+          (rec) => rec.i.name === 'demo_send' && rec.type === 'dropped' ? 'an event was dropped (' + rec.i.reason + ')' : '');
+        const acked = mine('acked'), batches = Array.from(new Set(acked.map((r) => r.i.batch)));
+        ev('measure', acked.length + ' acknowledged in batch' + (batches.length > 1 ? 'es ' : ' ') + batches.join(', '));
+        check(acked.length === 5 && batches.length === 1, 'All five events travelled in one batch and were acknowledged', 'the five events did not share one batch (' + batches.length + ' batches: ' + batches.join(', ') + ')');
+        await wait(0);
+        await show(document.getElementById('step-3'));
+        const box = document.getElementById('events'); box.scrollTop = 0;
+        const rows = Array.from(box.querySelectorAll('li[data-name="demo_send"]')).slice(0, 5);
+        ev('state', 'inspector: ' + rows.map((r) => r.dataset.state + '/' + (r.dataset.batch || '-')).join(' '));
+        check(rows.length === 5 && rows.every((r) => r.dataset.state === 'acked' && r.dataset.batch === rows[0].dataset.batch), 'The inspector shows five rows in one batch, all acknowledged', 'the inspector does not show five acknowledged rows in one batch');
+        await show(rows[2] || box);
+      });
     }
 
     function begin(id) {
       pt.run = id; pt.status = 'running'; pt.scene = 'Demo page'; pt.progress = 0;
-      pt.events = []; pt.problems = []; pt.t0 = Date.now();
+      pt.events = []; pt.problems = []; pt.t0 = Date.now(); cur = '';
       window.hawkesPlaytest._running = pt._running = true;
-      ev('start', id + ' at ' + window.innerWidth + 'px');
+      ev('start', id + ' at ' + window.innerWidth + 'x' + window.innerHeight);
     }
     function end() {
       pt.progress = 1;
-      pt.status = pt.problems.length ? 'lost' : 'won';
+      pt.status = pt.problems.some((p) => p.severity === 'bug') ? 'lost' : 'won';
       ev('finish', pt.status);
       window.hawkesPlaytest._running = pt._running = false;
     }
-
-    function runScenario(id, extras) {
+    function runScenario(id, steps) {
       begin(id);
-      return (async () => {
-        await exercisePage();
-        if (extras) await extras();
-      })().catch((e) => bad('Scenario error: ' + (e && e.message || e))).then(end);
+      return (async () => { await steps(); })().catch((e) => { if (e !== ABORT) fail('scenario error: ' + (e && e.message || e)); }).then(end);
     }
 
-    // Docs on the beta site: reachable from the demo header, sidebar nav, highlighted code + Copy, phone menu, no sideways scroll.
+    // Docs pages, in a frame: sidebar, highlighted code + Copy, a Menu at phone width, no sideways scroll.
     async function docsChecks() {
-      scene('Docs link from demo', 0.1);
-      const link = document.getElementById('docs-link');
-      link.scrollIntoView({ block: 'center' }); await wait(300);
-      ev('measure', 'Docs href=' + (link && link.getAttribute('href')));
-      if (!link || !/docs\/?$/.test(link.getAttribute('href') || '')) bad('Demo header has no Docs link to docs/');
-      else ok('Docs is reachable from the demo header');
-
+      await step('Docs link on the demo', 0.1, async () => {
+        const link = document.getElementById('docs-link'); await show(link);
+        ev('measure', 'Docs href=' + (link && link.getAttribute('href')));
+        check(link && /docs\/?$/.test(link.getAttribute('href') || ''), 'Docs is reachable from the demo header', 'the demo header has no Docs link to docs/');
+      });
       const pages = ['docs/index.html', 'docs/events.html', 'docs/api.html'];
       const host = document.createElement('div');
-      host.id = 'docs-frame-host';
-      host.setAttribute('aria-hidden', 'true');
+      host.id = 'docs-frame-host'; host.setAttribute('aria-hidden', 'true');
       host.style.cssText = 'position:fixed;inset:0;z-index:9999;background:var(--bg,#f6f5f2);display:flex;flex-direction:column;';
       const bar = document.createElement('div');
       bar.style.cssText = 'flex:none;padding:8px 12px;font-weight:600;background:var(--card,#fff);border-bottom:1px solid var(--line,#ddd);';
       const frame = document.createElement('iframe');
-      frame.title = 'Docs page under test';
-      frame.style.cssText = 'flex:1;width:100%;border:0;background:#fff;';
-      host.append(bar, frame);
-      document.body.append(host);
-
+      frame.title = 'Docs page under test'; frame.style.cssText = 'flex:1;width:100%;border:0;background:#fff;';
+      host.append(bar, frame); document.body.append(host);
       const loadDoc = (src) => new Promise((resolve, reject) => {
         const t = setTimeout(() => reject(new Error('docs load timeout: ' + src)), 10000);
         frame.onload = () => { clearTimeout(t); resolve(frame.contentDocument); };
         frame.onerror = () => { clearTimeout(t); reject(new Error('docs load error: ' + src)); };
         frame.src = src;
       });
-
-      for (let pi = 0; pi < pages.length; pi++) {
-        const src = pages[pi];
-        scene('Docs page: ' + src, 0.2 + pi * 0.25);
-        bar.textContent = src + ' @ ' + window.innerWidth + 'px';
-        let doc;
-        try { doc = await loadDoc(src); }
-        catch (e) { bad(String(e && e.message || e)); continue; }
-        await wait(400);
-        const side = doc.getElementById('sidebar');
-        const menu = doc.getElementById('menu-btn');
-        const snips = doc.querySelectorAll('.snip');
-        const highlighted = doc.querySelectorAll('pre code .kw, pre code .str, pre code .cmt');
-        const copyBtn = doc.querySelector('button.copy');
-        ev('measure', src + ' sidebar=' + !!side + ' menuBtn=' + !!menu + ' snips=' + snips.length + ' highlightSpans=' + highlighted.length);
-        if (!side) bad(src + ' has no sidebar'); else ok(src + ' has sidebar navigation');
-        if (!snips.length) bad(src + ' has no code blocks');
-        else {
-          ok(src + ' has code blocks');
-          if (!highlighted.length) bad(src + ' code is not highlighted'); else ok(src + ' code is syntax-highlighted');
-          if (!copyBtn) bad(src + ' has no Copy button');
-          else {
-            const cr = copyBtn.getBoundingClientRect();
-            ev('measure', src + ' Copy ' + Math.round(cr.width) + 'x' + Math.round(cr.height));
-            if (cr.height < 44 || cr.width < 44) bad(src + ' Copy button is smaller than 44px');
-            else ok(src + ' Copy button is at least 44px');
-            ev('press', src + ' Copy');
-            copyBtn.click(); await wait(200);
-            if (!/Copied|Copy|Press Ctrl\+C/.test(copyBtn.textContent || '')) bad(src + ' Copy button did not respond');
-            else ok(src + ' Copy button works');
-          }
+      try {
+        for (let pi = 0; pi < pages.length; pi++) {
+          const src = pages[pi];
+          await step('Docs page ' + src, 0.2 + pi * 0.2, async () => {
+            bar.textContent = src + ' @ ' + window.innerWidth + 'px';
+            const doc = await loadDoc(src);
+            const snips = doc.querySelectorAll('.snip'), copyBtn = doc.querySelector('button.copy');
+            ev('measure', src + ' sidebar=' + !!doc.getElementById('sidebar') + ' snips=' + snips.length);
+            check(doc.getElementById('sidebar'), src + ' has sidebar navigation', src + ' has no sidebar');
+            if (check(snips.length, src + ' has code blocks', src + ' has no code blocks')) {
+              check(doc.querySelectorAll('pre code .kw, pre code .str, pre code .cmt').length, src + ' code is syntax-highlighted', src + ' code is not highlighted');
+              if (check(copyBtn, '', src + ' has no Copy button')) {
+                const cr = copyBtn.getBoundingClientRect();
+                check(cr.height >= 44 && cr.width >= 44, src + ' Copy button is at least 44px', src + ' Copy button is smaller than 44px');
+                tap(copyBtn, src + ' Copy'); await wait(0);
+                check(/Copied|Copy|Press Ctrl\+C/.test(copyBtn.textContent || ''), src + ' Copy button works', src + ' Copy button did not respond');
+              }
+            }
+            const de = doc.documentElement;
+            check(de.scrollWidth <= de.clientWidth + 1, src + ' fits with no sideways scroll', src + ' scrolls sideways at ' + window.innerWidth + 'px');
+          });
         }
-        const de = doc.documentElement;
-        ev('measure', src + ' scrollWidth ' + de.scrollWidth + ' / clientWidth ' + de.clientWidth + ' (viewport ' + window.innerWidth + ')');
-        if (de.scrollWidth > de.clientWidth + 1) bad(src + ' scrolls sideways at ' + window.innerWidth + 'px');
-        else ok(src + ' fits with no sideways scroll');
-      }
-
-      // Phone: force a 390×844 frame so the Menu / no-sideways-scroll checks always run (even on a wide runner).
-      scene('Docs phone menu', 0.95);
-      host.style.alignItems = 'center';
-      host.style.justifyContent = 'center';
-      frame.style.cssText = 'flex:none;width:390px;height:844px;border:1px solid var(--line,#ddd);background:#fff;';
-      bar.textContent = 'docs/index.html @ 390×844';
-      let doc;
-      try { doc = await loadDoc('docs/index.html'); } catch (e) { bad(String(e && e.message || e)); host.remove(); return; }
-      await wait(400);
-      const menu = doc.getElementById('menu-btn');
-      const side = doc.getElementById('sidebar');
-      const win = frame.contentWindow;
-      const menuDisplay = menu ? win.getComputedStyle(menu).display : 'missing';
-      ev('measure', 'iframe 390x844 menuDisplay=' + menuDisplay + ' frameWidth=' + frame.clientWidth);
-      if (!menu || menuDisplay === 'none') bad('At 390px the Menu button is missing');
-      else ok('At 390px the sidebar is a Menu button');
-      const before = win.getComputedStyle(side).display;
-      ev('press', 'Docs Menu');
-      menu.click(); await wait(200);
-      const after = win.getComputedStyle(side).display;
-      ev('state', 'sidebar display ' + before + ' → ' + after + ', body.nav-open=' + doc.body.classList.contains('nav-open'));
-      if (!doc.body.classList.contains('nav-open') || after === 'none') bad('Menu did not open the sidebar');
-      else ok('Menu opens the docs sidebar');
-      const de = doc.documentElement;
-      ev('measure', 'phone scrollWidth ' + de.scrollWidth + ' / clientWidth ' + de.clientWidth);
-      if (de.scrollWidth > de.clientWidth + 1) bad('Docs page scrolls sideways at 390px');
-      else ok('Docs page has no sideways scroll at 390px');
-      host.remove();
+        await step('Docs phone menu at 390x844', 0.9, async () => {
+          host.style.alignItems = 'center'; host.style.justifyContent = 'center';
+          frame.style.cssText = 'flex:none;width:390px;height:844px;border:1px solid var(--line,#ddd);background:#fff;';
+          bar.textContent = 'docs/index.html @ 390×844';
+          const doc = await loadDoc('docs/index.html'), menu = doc.getElementById('menu-btn'), win = frame.contentWindow;
+          check(menu && win.getComputedStyle(menu).display !== 'none', 'At 390px the sidebar is a Menu button', 'at 390px the Menu button is missing');
+          if (menu) { tap(menu, 'Docs Menu'); await wait(0); }
+          check(doc.body.classList.contains('nav-open'), 'Menu opens the docs sidebar', 'the Menu did not open the sidebar');
+          const de = doc.documentElement;
+          check(de.scrollWidth <= de.clientWidth + 1, 'Docs page has no sideways scroll at 390px', 'docs page scrolls sideways at 390px');
+        });
+      } finally { host.remove(); }
     }
+
+    const SCENARIO_RUNS = {
+      smoke: async () => { await stepSdk(); await stepSend(0.2); await stepOptOutAndBadName(0.6); await stepDocsLinks(0.9); },
+      phone: async () => { await stepSdk(); await stepSend(0.15); await stepOptOutAndBadName(0.45); await stepNoSideways(0.7); await stepLayout(0.8); await stepDocsLinks(0.9); },
+      inspector: async () => { await stepSdk(); await stepFiveSends(0.2); await stepOptOutAndBadName(0.5); await stepDocsLinks(0.9); },
+      mobile: async () => { await stepSdk(); await stepSend(0.15); await stepOptOutAndBadName(0.4); await stepBatching(0.8); },
+      docs: async () => { await docsChecks(); await stepDocsLinks(0.97); },
+    };
 
     window.hawkesPlaytest = {
       version: 2, product: 'hawkes-analytics', _running: false,
       scenarios: () => [
-        { id: 'smoke', title: 'Send, acknowledge, opt-out, bad name', seconds: 45, tags: ['smoke'],
-          description: 'Presses Send and waits for the acknowledged row (fails with "No event reached Hawkes Gen within 10 seconds"), scrolls steps 1–3 and What we send, toggles opt-out and checks nothing is sent, then sends a bad event name to show the warning. Each step is a scene for screenshots.' },
-        { id: 'phone', title: 'Phone: exercise page plus layout', seconds: 55, tags: ['layout', 'phone'],
-          description: 'Same exercise as smoke at phone size (390×844, touch), plus layout checks: Copy ≥44px and above the snippet, no sideways scroll on What we send, opt-out switch ≥44px.' },
-        { id: 'mobile', title: 'Mobile: exercise page plus batching', seconds: 60, tags: ['mobile', 'batching'],
-          description: 'Same exercise as smoke at phone size, plus async tag / interactive-in-3s, five Quick clicks → one batched request, and hide-sends-queued.' },
-        { id: 'docs', title: 'Docs: sidebar, Copy, phone menu', seconds: 50, tags: ['docs', 'layout'],
-          description: 'From the demo Docs link, loads docs/index, events and api in-frame: sidebar nav, syntax-highlighted code with working Copy (≥44px), and at ≤720px the sidebar becomes a Menu with no sideways scroll.' },
+        { id: 'smoke', title: 'Send, acknowledge, opt-out, bad name, docs links', seconds: 30, tags: ['smoke'],
+          description: 'Presses Send and waits on the SDK listeners for acknowledged (fails naming the step, e.g. "No event reached Hawkes Gen within 10 seconds"), opts out and checks the dropped row says "opted out", sends a bad event name and checks its warning, then checks every internal docs link returns 200.' },
+        { id: 'phone', title: 'Phone: touch flow, no sideways scroll', seconds: 40, tags: ['layout', 'phone'],
+          description: 'The smoke flow at phone size (390x844, touch), plus no sideways scroll in any section, Copy and the opt-out switch at least 44px, and the docs links.' },
+        { id: 'inspector', title: 'Inspector: five Sends, one batch; dropped rows with reasons', seconds: 35, tags: ['inspector'],
+          description: 'Taps Send five times quickly and checks the five rows share one batch and are all acknowledged; turns opt-out on and checks a dropped row saying "opted out"; sends a bad name and checks its warning and its dropped row; checks the docs links. Waits only on SDK listener events.' },
+        { id: 'mobile', title: 'Mobile: touch flow plus batching', seconds: 45, tags: ['mobile', 'batching'],
+          description: 'The smoke flow at phone size, plus async tag, interactive in 3 s, five Quick clicks in one batched request, and hiding the page sends what waits.' },
+        { id: 'docs', title: 'Docs: sidebar, Copy, phone menu, links', seconds: 45, tags: ['docs', 'layout'],
+          description: 'From the demo Docs link, loads docs/index, events and api in-frame: sidebar, highlighted code with working Copy (44px or more), a Menu at 390px with no sideways scroll, then every internal docs link returns 200.' },
       ],
       start(id) {
-        if (id === 'phone') return runScenario('phone', layoutChecks);
-        if (id === 'mobile') return runScenario('mobile', batchingChecks);
-        if (id === 'smoke') return runScenario('smoke', null);
-        if (id === 'docs') {
-          begin('docs');
-          return docsChecks().catch((e) => bad('Scenario error: ' + (e && e.message || e))).then(end);
-        }
-        pt.status = 'error'; pt.problems = [{ severity: 'bug', message: 'Unknown scenario ' + id }]; pt.run = id; return;
+        if (SCENARIO_RUNS[id]) return runScenario(id, SCENARIO_RUNS[id]);
+        pt.status = 'error'; pt.problems = [{ severity: 'bug', message: 'Unknown scenario ' + id }]; pt.run = id;
       },
       stop() { pt.status = pt.status === 'running' ? 'done' : pt.status; window.hawkesPlaytest._running = pt._running = false; },
       state: () => ({ ready: document.readyState === 'complete', status: pt.status, scene: pt.scene, progress: pt.progress,
         note: (document.getElementById('send-result') || {}).textContent || '' }),
       report: () => ({ scenario: pt.run || 'smoke', outcome: pt.status === 'won' ? 'won' : pt.status === 'running' ? 'stuck' : pt.status === 'idle' ? 'done' : pt.status === 'lost' ? 'lost' : 'error',
-        seconds: pt.t0 ? (Date.now() - pt.t0) / 1000 : 0, metrics: { sent: sendN, acknowledged: Object.values(acks).filter((x) => x.ok).length, problems: pt.problems.length },
+        seconds: pt.t0 ? (Date.now() - pt.t0) / 1000 : 0, metrics: { sent: sendN, acknowledged: feed.filter((r) => r.type === 'acked').length, dropped: feed.filter((r) => r.type === 'dropped').length, problems: pt.problems.length },
         events: pt.events, problems: pt.problems, log: pt.events.map((e) => e.type + (e.detail ? ': ' + e.detail : '')) }),
     };
     { const q = new URLSearchParams(location.search).get('playtest'); if (q) window.addEventListener('load', () => window.hawkesPlaytest.start(q)); }
 
     window.hawkesPlaytest.sendToGen = sendToGen;
     window.hawkesPlaytest.sendBadName = sendBadName;
+    window.hawkesPlaytest._checkLinks = checkLinks;   // pure: tools/check.mjs runs it against a fake site
   })();
   </script>
   <!-- The one line a page needs. async: it never holds the page up. This demo reports to the hawkes-analytics product; its events are flagged. -->
@@ -508,8 +587,9 @@ hawkesAnalytics.death('spikes');
 hawkesAnalytics.levelEnd(1, 'complete');
 hawkesAnalytics.track('demo_click');</pre>
     </div>
-    <p>Or send one event all the way to Hawkes Gen and see it come back acknowledged. This one is not kept for any player;
-       it only proves the road is open.</p>
+    <p>Or send one event all the way to Hawkes Gen and see it come back acknowledged. It goes through the SDK like any event
+       from your game, to this demo's own <code>hawkes-analytics</code> product, and step 3 shows it queued, sent and
+       acknowledged. Press it five times fast to see them share one batch.</p>
     <div class="row"><button id="send-event" class="primary">Send an event to Hawkes Gen</button></div>
     <p id="send-result" role="status">Nothing sent yet.</p>
     <p id="listen-log" role="log" aria-label="Listener log"></p>
