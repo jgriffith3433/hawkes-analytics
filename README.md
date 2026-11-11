@@ -195,7 +195,7 @@ moves when beta goes live; a new version on main is tagged and released by itsel
 ## Contributing
 
 Compile check: CI runs `dotnet build DevTools/CompileCheck` (Runtime + Samples, with and without `UNITY_WEBGL`); Studio's
-Gen compile-only gate builds `tools/unity-check/` (Unity 6, local `file:` path to the package) and fails with file and line.
+sandbox syntax check and Gen compile gate (`tools/unity-check/`, Unity 6) fail broken C# with file and line, so it can't merge.
 
 `npm test` covers the browser SDK, the loader and `tools/check.mjs` (one version everywhere, `.meta` GUIDs).
 
