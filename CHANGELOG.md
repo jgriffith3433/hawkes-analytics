@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Recipes on the docs site (`docs/recipes.md`): plain web (script tag), Babylon.js (npm, events from a scene) and Unity
+  WebGL (package plus the jslib bridge). Each sends `game_ready`, `level_start`, `death` and `level_end`. `npm test`
+  (`test/recipes.test.ts`) runs the plain web and Babylon code from the page in a headless page and passes only when
+  all 8 events are acknowledged by the beta collect endpoint (`HAWKES_RECIPES_OFFLINE=1` skips it with no network); the
+  Unity recipe is `DevTools/CompileCheck/Recipes/HawkesRecipe.cs`, compiled by the existing CI gate, and a test keeps
+  the page and the file identical. Docs code blocks now scroll inside their own box at phone width.
+
 ## 1.4.1 (2026-11-10)
 
 - Unity compile gate: `tools/unity-check/` is a Unity 6 (`6000.3.7f1`) fixture that references

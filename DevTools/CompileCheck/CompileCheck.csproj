@@ -14,5 +14,6 @@
     <Compile Include="UnityEngineStub.cs" />
     <Compile Include="../../Packages/com.hawkes.analytics/Runtime/**/*.cs" />
     <Compile Include="../../Packages/com.hawkes.analytics/Samples~/**/*.cs" />
+    <Compile Include="Recipes/**/*.cs" />
   </ItemGroup>
 </Project>

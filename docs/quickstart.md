@@ -62,6 +62,9 @@ sent in the Editor.
 send an event, and the list on screen shows every call, newest first. In the Editor nothing leaves your machine; build
 for WebGL with a Product in the settings and the same events reach Hawkes Studio.
 
+Want the whole first session (`game_ready`, `level_start`, `death`, `level_end`) in one paste? See the
+[recipes](recipes.md): plain web, Babylon.js and Unity WebGL, each tested.
+
 ## If something is wrong
 
 The SDK never breaks your game, and when something is off it says so in the console, in plain words: what happened and
